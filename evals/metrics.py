@@ -1,9 +1,21 @@
 import os
+import sys
+import types
 import asyncio
 import logfire
 import pandas as pd
 from openai import AsyncOpenAI
 
+# ragas 0.4.3 still imports the legacy langchain_community.chat_models.vertexai
+# path, which langchain-community has since removed in favor of the standalone
+# langchain-google-vertexai package (already a project dependency — see
+# requirements.txt's NeMo Guardrails shim comment for the same class of issue).
+# Register a shim so the old import path resolves to the real installed class.
+if "langchain_community.chat_models.vertexai" not in sys.modules:
+    from langchain_google_vertexai import ChatVertexAI as _ChatVertexAI
+    _vertexai_shim = types.ModuleType("langchain_community.chat_models.vertexai")
+    _vertexai_shim.ChatVertexAI = _ChatVertexAI
+    sys.modules["langchain_community.chat_models.vertexai"] = _vertexai_shim
 
 from ragas.llms import llm_factory
 from ragas.embeddings import HuggingFaceEmbeddings

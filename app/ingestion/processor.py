@@ -67,7 +67,7 @@ def process_file(file_path: str, filename: str, source_type: str):
                 full_text = parse_pdf(file_path)
             elif ext in ("html", "htm"):
                 full_text = parse_html(file_path)
-            elif ext == "txt":
+            elif ext in ("txt", "md"):
                 full_text = parse_text(file_path)
             elif ext in ("docx", "pptx"):
                 from app.ingestion.loaders.office import parse_office
@@ -124,12 +124,35 @@ def process_file(file_path: str, filename: str, source_type: str):
             logfire.error(f"Failed to process {filename}: {e}")
 
 
+# Preferred order when the same page exists in multiple formats (cleanest text first).
+_FORMAT_PREFERENCE = [".md", ".txt", ".pdf", ".docx", ".pptx", ".html", ".htm"]
+
+
+def _format_rank(filename: str) -> int:
+    ext = os.path.splitext(filename)[1].lower()
+    return _FORMAT_PREFERENCE.index(ext) if ext in _FORMAT_PREFERENCE else len(_FORMAT_PREFERENCE)
+
+
 def process_directory(dir_path: str, source_type: str):
-    """Process every file in a directory."""
+    """Process every file in a directory, keeping one file per basename.
+
+    A crawl often saves the same page as .md/.docx/.pdf; ingesting all of them
+    would index the same content multiple times, so we pick the cleanest format
+    per page (e.g. .md over .docx).
+    """
     with logfire.span("Scanning Directory", path=dir_path, source=source_type):
         files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
-        logfire.info(f"Found {len(files)} files in {dir_path}.")
-        for filename in files:
+
+        by_stem: dict[str, str] = {}
+        for f in files:
+            stem = os.path.splitext(f)[0]
+            if stem not in by_stem or _format_rank(f) < _format_rank(by_stem[stem]):
+                by_stem[stem] = f
+        chosen = sorted(by_stem.values())
+
+        skipped = len(files) - len(chosen)
+        logfire.info(f"Found {len(files)} files in {dir_path}; ingesting {len(chosen)} (skipped {skipped} duplicate formats).")
+        for filename in chosen:
             process_file(os.path.join(dir_path, filename), filename, source_type)
 
 
