@@ -20,7 +20,8 @@ def initialize_rails() -> None:
     guard_llm = ChatGroq(
         api_key=settings.GROQ_API_KEY,
         model="llama-3.1-8b-instant",
-        temperature=0
+        temperature=0,
+        max_retries=6,  # this call bypasses Portkey's retry/fallback entirely — needs its own resilience against Groq's free-tier TPM limit
     )
 
     config = RailsConfig.from_content(

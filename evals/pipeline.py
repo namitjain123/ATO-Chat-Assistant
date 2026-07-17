@@ -7,7 +7,7 @@ import logfire
 
 API_URL = "http://localhost:8000/query"
 RESPONSE_TRUNCATE = 300
-DELAY_BETWEEN_CALLS = 10   # seconds — stays within Groq RPM on the main key
+DELAY_BETWEEN_CALLS = 20   # seconds — each /query triggers ~3-5 internal Groq calls (guardrails + planner + responder); 10s was hitting the free-tier TPM ceiling
 REQUEST_TIMEOUT = 120      # seconds — guardrails + LangGraph + Groq can take >60s
 
 
