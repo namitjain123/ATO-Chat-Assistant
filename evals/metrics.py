@@ -78,23 +78,33 @@ def _prep_samples(golden_dataset: dict) -> list:
 
 
 def _score_df(metric_key: str, samples: list, scores) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"question": s["question"][:65], metric_key: round(float(r.value), 3)}
-        for s, r in zip(samples, scores)
-    ])
+    rows = []
+    for s, r in zip(samples, scores):
+        value = round(float(r.value), 3) if r is not None else None
+        rows.append({"question": s["question"][:65], metric_key: value})
+    return pd.DataFrame(rows)
 
 
 async def _batched_score(metric, inputs: list, samples: list, status_cb=None, label: str = "") -> list:
     """
     Runs abatch_score in chunks of GENERAL_BATCH_SIZE with cooldowns between chunks.
     Keeps each burst under 6,000 TPM on Groq's on_demand tier.
+
+    A single sample's failure (bad JSON from the judge, a transient API error, etc.)
+    is caught and recorded as None rather than aborting the whole experiment —
+    one flaky judge response shouldn't cost the other ~9 samples' results.
     """
     all_scores = []
     batches = [inputs[i : i + GENERAL_BATCH_SIZE] for i in range(0, len(inputs), GENERAL_BATCH_SIZE)]
     for b_idx, batch in enumerate(batches):
         if b_idx > 0:
             await _cooldown(COOLDOWN_MINI, f"{label} batch {b_idx}", status_cb)
-        scores = await metric.abatch_score(batch)
+        try:
+            scores = await metric.abatch_score(batch)
+        except Exception as e:
+            if status_cb:
+                status_cb(f"⚠️ {label} batch {b_idx} failed ({type(e).__name__}) — recording as skipped.")
+            scores = [None] * len(batch)
         all_scores.extend(scores)
     return all_scores
 
@@ -116,97 +126,122 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
         # ── Exp 1: Faithfulness ───────────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 1/6 — Faithfulness ({len(samples)} samples)...")
-        with logfire.span("🧪 Exp 1 — Faithfulness"):
-            inputs = [
-                {
-                    "user_input": s["question"],
-                    "response": s["actual_response"],
-                    "retrieved_contexts": s["actual_contexts"],
-                }
-                for s in samples
-            ]
-            scores = await _batched_score(Faithfulness(llm=judge_llm), inputs, samples, status_cb, "Faithfulness")
-            df = _score_df("faithfulness", samples, scores)
-            results["faithfulness"] = df
-            logfire.info("🧪 Faithfulness done", avg=round(df["faithfulness"].mean(), 3))
+        try:
+            with logfire.span("🧪 Exp 1 — Faithfulness"):
+                inputs = [
+                    {
+                        "user_input": s["question"],
+                        "response": s["actual_response"],
+                        "retrieved_contexts": s["actual_contexts"],
+                    }
+                    for s in samples
+                ]
+                scores = await _batched_score(Faithfulness(llm=judge_llm), inputs, samples, status_cb, "Faithfulness")
+                df = _score_df("faithfulness", samples, scores)
+                results["faithfulness"] = df
+                logfire.info("🧪 Faithfulness done", avg=round(df["faithfulness"].mean(), 3))
+        except Exception as e:
+            if status_cb:
+                status_cb(f"❌ Exp 1/6 — Faithfulness failed entirely ({type(e).__name__}): {e}")
+            logfire.error(f"Faithfulness experiment failed: {e}")
 
         await _cooldown(COOLDOWN_STANDARD, "Faithfulness", status_cb)
 
         # ── Exp 2: Answer Relevancy ───────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 2/6 — Answer Relevancy ({len(samples)} samples)...")
-        with logfire.span("🧪 Exp 2 — Answer Relevancy"):
-            inputs = [
-                {"user_input": s["question"], "response": s["actual_response"]}
-                for s in samples
-            ]
-            scores = await _batched_score(
-                AnswerRelevancy(llm=judge_llm, embeddings=ragas_embeddings),
-                inputs, samples, status_cb, "Answer Relevancy"
-            )
-            df = _score_df("answer_relevancy", samples, scores)
-            results["answer_relevancy"] = df
-            logfire.info("🧪 Answer Relevancy done", avg=round(df["answer_relevancy"].mean(), 3))
+        try:
+            with logfire.span("🧪 Exp 2 — Answer Relevancy"):
+                inputs = [
+                    {"user_input": s["question"], "response": s["actual_response"]}
+                    for s in samples
+                ]
+                scores = await _batched_score(
+                    AnswerRelevancy(llm=judge_llm, embeddings=ragas_embeddings),
+                    inputs, samples, status_cb, "Answer Relevancy"
+                )
+                df = _score_df("answer_relevancy", samples, scores)
+                results["answer_relevancy"] = df
+                logfire.info("🧪 Answer Relevancy done", avg=round(df["answer_relevancy"].mean(), 3))
+        except Exception as e:
+            if status_cb:
+                status_cb(f"❌ Exp 2/6 — Answer Relevancy failed entirely ({type(e).__name__}): {e}")
+            logfire.error(f"Answer Relevancy experiment failed: {e}")
 
         await _cooldown(COOLDOWN_STANDARD, "Answer Relevancy", status_cb)
 
         # ── Exp 3: Context Precision ──────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 3/6 — Context Precision ({len(samples)} samples)...")
-        with logfire.span("🧪 Exp 3 — Context Precision"):
-            inputs = [
-                {
-                    "user_input": s["question"],
-                    "reference": s["reference"],
-                    "retrieved_contexts": s["actual_contexts"],
-                }
-                for s in samples
-            ]
-            scores = await _batched_score(ContextPrecision(llm=judge_llm), inputs, samples, status_cb, "Context Precision")
-            df = _score_df("context_precision", samples, scores)
-            results["context_precision"] = df
-            logfire.info("🧪 Context Precision done", avg=round(df["context_precision"].mean(), 3))
+        try:
+            with logfire.span("🧪 Exp 3 — Context Precision"):
+                inputs = [
+                    {
+                        "user_input": s["question"],
+                        "reference": s["reference"],
+                        "retrieved_contexts": s["actual_contexts"],
+                    }
+                    for s in samples
+                ]
+                scores = await _batched_score(ContextPrecision(llm=judge_llm), inputs, samples, status_cb, "Context Precision")
+                df = _score_df("context_precision", samples, scores)
+                results["context_precision"] = df
+                logfire.info("🧪 Context Precision done", avg=round(df["context_precision"].mean(), 3))
+        except Exception as e:
+            if status_cb:
+                status_cb(f"❌ Exp 3/6 — Context Precision failed entirely ({type(e).__name__}): {e}")
+            logfire.error(f"Context Precision experiment failed: {e}")
 
         await _cooldown(COOLDOWN_STANDARD, "Context Precision", status_cb)
 
         # ── Exp 4: Context Recall ─────────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 4/6 — Context Recall ({len(samples)} samples)...")
-        with logfire.span("🧪 Exp 4 — Context Recall"):
-            inputs = [
-                {
-                    "user_input": s["question"],
-                    "reference": s["reference"],
-                    "retrieved_contexts": s["actual_contexts"],
-                }
-                for s in samples
-            ]
-            scores = await _batched_score(ContextRecall(llm=judge_llm), inputs, samples, status_cb, "Context Recall")
-            df = _score_df("context_recall", samples, scores)
-            results["context_recall"] = df
-            logfire.info("🧪 Context Recall done", avg=round(df["context_recall"].mean(), 3))
+        try:
+            with logfire.span("🧪 Exp 4 — Context Recall"):
+                inputs = [
+                    {
+                        "user_input": s["question"],
+                        "reference": s["reference"],
+                        "retrieved_contexts": s["actual_contexts"],
+                    }
+                    for s in samples
+                ]
+                scores = await _batched_score(ContextRecall(llm=judge_llm), inputs, samples, status_cb, "Context Recall")
+                df = _score_df("context_recall", samples, scores)
+                results["context_recall"] = df
+                logfire.info("🧪 Context Recall done", avg=round(df["context_recall"].mean(), 3))
+        except Exception as e:
+            if status_cb:
+                status_cb(f"❌ Exp 4/6 — Context Recall failed entirely ({type(e).__name__}): {e}")
+            logfire.error(f"Context Recall experiment failed: {e}")
 
         await _cooldown(COOLDOWN_STANDARD, "Context Recall", status_cb)
 
         # ── Exp 5: Answer Correctness (split into batches) ────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 5/6 — Answer Correctness batch 1/2...")
-        with logfire.span("🧪 Exp 5 — Answer Correctness"):
-            inputs = [
-                {
-                    "user_input": s["question"],
-                    "response": s["actual_response"],
-                    "reference": s["reference"],
-                }
-                for s in samples
-            ]
-            all_scores = await _batched_score(
-                AnswerCorrectness(llm=judge_llm, embeddings=ragas_embeddings),
-                inputs, samples, status_cb, "Answer Correctness"
-            )
-            df = _score_df("answer_correctness", samples, all_scores)
-            results["answer_correctness"] = df
-            logfire.info("🧪 Answer Correctness done", avg=round(df["answer_correctness"].mean(), 3))
+        try:
+            with logfire.span("🧪 Exp 5 — Answer Correctness"):
+                inputs = [
+                    {
+                        "user_input": s["question"],
+                        "response": s["actual_response"],
+                        "reference": s["reference"],
+                    }
+                    for s in samples
+                ]
+                all_scores = await _batched_score(
+                    AnswerCorrectness(llm=judge_llm, embeddings=ragas_embeddings),
+                    inputs, samples, status_cb, "Answer Correctness"
+                )
+                df = _score_df("answer_correctness", samples, all_scores)
+                results["answer_correctness"] = df
+                logfire.info("🧪 Answer Correctness done", avg=round(df["answer_correctness"].mean(), 3))
+        except Exception as e:
+            if status_cb:
+                status_cb(f"❌ Exp 5/6 — Answer Correctness failed entirely ({type(e).__name__}): {e}")
+            logfire.error(f"Answer Correctness experiment failed: {e}")
 
         await _cooldown(COOLDOWN_STANDARD, "Answer Correctness", status_cb)
 
