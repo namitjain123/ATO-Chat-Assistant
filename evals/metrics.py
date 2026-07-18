@@ -41,7 +41,11 @@ CONTEXT_LIMIT = 2       # number of context chunks passed to RAGAS per sample
 def _build_judge():
     api_key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
     client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
-    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
+    # openai/gpt-oss-20b is a reasoning model — it spends tokens on internal reasoning
+    # before writing the final JSON; the default max_tokens=1024 was too small and
+    # caused truncated/invalid JSON ("max completion tokens reached before generating
+    # a valid document"). Give it more headroom.
+    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client, max_tokens=4096)
     embeddings = HuggingFaceEmbeddings(
         model="sentence-transformers/all-MiniLM-L6-v2",
         use_api=False,
