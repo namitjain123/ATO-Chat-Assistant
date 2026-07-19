@@ -102,6 +102,11 @@ define flow farewell
 """
 
 YAML_CONTENT = """
+models:
+  - type: embeddings
+    engine: FastEmbed
+    model: all-MiniLM-L6-v2
+
 instructions:
   - type: general
     content: |
@@ -109,6 +114,17 @@ instructions:
       knowledge base. Only answer substantive questions using that knowledge base —
       refuse generic off-topic requests (jokes, trivia, math, weather, etc.) that
       have nothing to do with it. Be professional and concise.
+
+rails:
+  dialog:
+    user_messages:
+      # Classify user intent by pure embedding similarity to the examples in the
+      # 'define user ...' blocks, instead of letting the LLM free-form a canonical
+      # form (which drifted and let near-verbatim jailbreaks like DAN slip through).
+      # Below the threshold, intent falls back to the LLM (so legitimate questions
+      # that don't match any guardrail intent pass through to the RAG pipeline).
+      embeddings_only: True
+      embeddings_only_similarity_threshold: 0.6
 """
 
 # Distinctive substrings from each 'define bot' block above.
