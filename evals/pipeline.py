@@ -6,7 +6,12 @@ import requests
 import logfire
 
 API_URL = "http://localhost:8000/query"
-RESPONSE_TRUNCATE = 300
+# Safety cap only (e.g. a runaway/looping completion) — NOT a display truncation.
+# Real answers were previously hard-cut at 300 chars, which fed Phase 2's Faithfulness
+# and Answer Correctness metrics a broken, incomplete sentence and unfairly tanked
+# their scores. Both eval-UI tables already do their own short re-truncation for
+# display (evals/app.py), so storing the full response here doesn't affect the UI.
+RESPONSE_TRUNCATE = 2000
 DELAY_BETWEEN_CALLS = 20   # seconds — each /query triggers ~3-5 internal Groq calls (guardrails + planner + responder); 10s was hitting the free-tier TPM ceiling
 REQUEST_TIMEOUT = 120      # seconds — guardrails + LangGraph + Groq can take >60s
 
@@ -105,4 +110,13 @@ def save_results(dataset: dict, path: str) -> None:
 def load_golden_dataset() -> dict:
     golden_path = os.path.join(os.path.dirname(__file__), "golden_dataset.json")
     with open(golden_path, encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+
+    # Optional cap for a quick demo run — set EVAL_SAMPLE_LIMIT=5 to only run the
+    # first 5 golden questions through the live pipeline instead of all 75.
+    limit = os.getenv("EVAL_SAMPLE_LIMIT")
+    if limit and limit.isdigit():
+        n = int(limit)
+        data["rag_samples"] = data["rag_samples"][:n]
+
+    return data
