@@ -43,7 +43,7 @@ GENERAL_BATCH_SIZE = 1  # one sample at a time: abatch_score fires calls concurr
 # claims and scored ~0. Still capped (not the full ~1500 chars/chunk x5) to stay
 # under Groq's TPM ceiling. Override via env if a specific judge model needs tuning.
 CONTEXT_TRUNCATE = int(os.getenv("EVAL_CONTEXT_TRUNCATE", "800"))  # chars per context chunk
-CONTEXT_LIMIT = int(os.getenv("EVAL_CONTEXT_LIMIT", "5"))          # number of context chunks passed to RAGAS per sample
+CONTEXT_LIMIT = int(os.getenv("EVAL_CONTEXT_LIMIT", "8"))          # number of context chunks passed to RAGAS per sample — matches retriever.py's top_n=8
 
 
 def _build_judge():

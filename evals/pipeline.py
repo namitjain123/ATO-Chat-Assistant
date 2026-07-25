@@ -71,7 +71,7 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
                     sources = data.get("sources") or []
 
                     sample["actual_response"] = raw_answer[:RESPONSE_TRUNCATE]
-                    sample["actual_contexts"] = sources[:5]
+                    sample["actual_contexts"] = sources[:8]  # matches retriever.py's top_n=8
                     sample["actual_tools_called"] = [detect_tool(thought_process)]
 
                     logfire.info(
