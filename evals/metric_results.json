@@ -1,0 +1,384 @@
+{
+  "per_sample": {
+    "faithfulness": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "faithfulness": 0.2
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "faithfulness": 0.0
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "faithfulness": 0.333
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "faithfulness": 0.75
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "faithfulness": 1.0
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "faithfulness": 0.333
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "faithfulness": 0.5
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "faithfulness": 0.5
+      }
+    ],
+    "answer_relevancy": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "answer_relevancy": 0.951
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "answer_relevancy": 0.605
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "answer_relevancy": 0.739
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "answer_relevancy": 0.703
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "answer_relevancy": 0.747
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "answer_relevancy": 0.983
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "answer_relevancy": 0.612
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "answer_relevancy": 0.722
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "answer_relevancy": 0.494
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "answer_relevancy": 0.643
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "answer_relevancy": 0.942
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "answer_relevancy": 0.834
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "answer_relevancy": 0.78
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "answer_relevancy": 0.0
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "answer_relevancy": 0.763
+      }
+    ],
+    "context_precision": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "context_precision": 0.0
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "context_precision": 1.0
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "context_precision": 1.0
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "context_precision": 1.0
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "context_precision": 1.0
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "context_precision": 0.0
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "context_precision": 1.0
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "context_precision": 0.0
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "context_precision": 0.5
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "context_precision": 0.0
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "context_precision": 0.5
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "context_precision": 0.0
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "context_precision": 1.0
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "context_precision": 1.0
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "context_precision": 0.0
+      }
+    ],
+    "context_recall": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "context_recall": 0.0
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "context_recall": 0.0
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "context_recall": 1.0
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "context_recall": 0.25
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "context_recall": 0.0
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "context_recall": 0.333
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "context_recall": 0.25
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "context_recall": 0.0
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "context_recall": 1.0
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "context_recall": 0.3
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "context_recall": NaN
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "context_recall": NaN
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "context_recall": NaN
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "context_recall": 0.5
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "context_recall": NaN
+      }
+    ],
+    "answer_correctness": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "answer_correctness": null
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "answer_correctness": null
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "answer_correctness": null
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "answer_correctness": null
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "answer_correctness": null
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "answer_correctness": null
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "answer_correctness": null
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "answer_correctness": null
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "answer_correctness": null
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "answer_correctness": null
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "answer_correctness": null
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "answer_correctness": null
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "answer_correctness": null
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "answer_correctness": null
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "answer_correctness": null
+      }
+    ],
+    "tool_correctness": [
+      {
+        "question": "Which niche ATO portals serve foreign investors, non-residents, a",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Per ATO, does the $1,000 std WRE deduction start 2026–27 and excl",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "If ATO What's New shows 0/0, what 3 actions incl. spelling, legal",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Summarize ATO disability tax info: NDIS, offset/rebate eligibilit",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "When does ATO’s $1,000 work-expense standard deduction start, and",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Which ATO deduction categories cover work-related expenses, DGR g",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Summarize ATO disability tax support: NDIS, offsets/rebates, car ",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Suppose you get a fake ATO call—what scam-report line and weekday",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "If unsure an email/SMS/call is real, how can you verify or report",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Map ATO support links and match each user type to its specific on",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "If a fake ATO msg and TFN theft occur, which ATO help pages apply",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "Which employment-related deductions cover cars, work tools, cloth",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "If you bought tools, WFH supplies, and training, which work expen",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "If a CALD or ATSI group sought free virtual tax-super education, ",
+        "tool_correctness": 1.0
+      },
+      {
+        "question": "List ATO online svc login methods for individuals, businesses, ag",
+        "tool_correctness": 1.0
+      }
+    ]
+  },
+  "averages": {
+    "faithfulness": 0.241,
+    "answer_relevancy": 0.701,
+    "context_precision": 0.533,
+    "context_recall": 0.33,
+    "answer_correctness": NaN,
+    "tool_correctness": 1.0
+  }
+}

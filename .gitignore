@@ -5,3 +5,4 @@ __pycache__/DATA/
 __pycache__
 DATA/
 notes.md
+processed_data/

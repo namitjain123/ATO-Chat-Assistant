@@ -43,10 +43,11 @@ def generate_node(state: AgentState):
                 break
 
         prompt = f"""
-        You are a Senior Technical Architect.
-        Answer the question using the TECHNICAL CONTEXT provided.
+        You are a knowledgeable AI assistant that answers questions using the
+        documents in your knowledge base.
+        Answer the question using the CONTEXT provided.
 
-        TECHNICAL CONTEXT:
+        CONTEXT:
         {full_context}
 
         CONVERSATION HISTORY:

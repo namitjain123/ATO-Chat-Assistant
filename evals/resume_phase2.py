@@ -20,7 +20,7 @@ sys.stderr.reconfigure(encoding="utf-8")
 
 from evals.metrics import run_all_metrics
 
-SAMPLE_LIMIT = 10
+SAMPLE_LIMIT = 15
 
 
 def status_cb(msg: str):
