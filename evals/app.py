@@ -134,7 +134,8 @@ with tab1:
         })
     df_golden = pd.DataFrame(rag_rows)
     st.dataframe(df_golden, use_container_width=True, hide_index=True)
-    st.caption(f"✅ {len(rag_rows)} golden RAG samples from 5 enterprise docs")
+    n_domains = len(set(s["domain"] for s in golden["rag_samples"]))
+    st.caption(f"✅ {len(rag_rows)} golden RAG samples across {n_domains} source pages")
 
     st.divider()
 
