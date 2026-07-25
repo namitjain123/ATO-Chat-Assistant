@@ -30,12 +30,20 @@ from ragas.metrics.collections import (
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 JUDGE_MODEL = "openai/gpt-oss-20b"  # llama-3.1-8b-instant AND llama-3.3-70b-versatile both hit their daily (TPD) quota today
-COOLDOWN_STANDARD = 62
-COOLDOWN_MINI = 40       # between individual samples — lets sliding TPM window recover (~2,800 tok/sample)
+# Cooldowns pace requests under Groq's per-minute (TPM) limit. Defaults are tuned
+# for large runs; for a small sample count they're overkill, so they're overridable
+# via env vars (EVAL_COOLDOWN_STANDARD / EVAL_COOLDOWN_MINI). The per-sample resilience
+# in _batched_score still catches any 429 if the cooldown is set too aggressively.
+COOLDOWN_STANDARD = int(os.getenv("EVAL_COOLDOWN_STANDARD", "62"))
+COOLDOWN_MINI = int(os.getenv("EVAL_COOLDOWN_MINI", "40"))  # between samples — lets the sliding TPM window recover (~2,800 tok/sample)
 GENERAL_BATCH_SIZE = 1  # one sample at a time: abatch_score fires calls concurrently per sample,
                          # so batch>1 stacks multiple samples' async calls inside the same second
-CONTEXT_TRUNCATE = 300  # chars per context chunk — reduces single request from ~7,700 to ~400 tokens
-CONTEXT_LIMIT = 2       # number of context chunks passed to RAGAS per sample
+# Raised from 300/2 (600 chars total) — that was so small vs. the now-untruncated
+# ~2000-char response that Faithfulness couldn't find support for genuinely-grounded
+# claims and scored ~0. Still capped (not the full ~1500 chars/chunk x5) to stay
+# under Groq's TPM ceiling. Override via env if a specific judge model needs tuning.
+CONTEXT_TRUNCATE = int(os.getenv("EVAL_CONTEXT_TRUNCATE", "800"))  # chars per context chunk
+CONTEXT_LIMIT = int(os.getenv("EVAL_CONTEXT_LIMIT", "5"))          # number of context chunks passed to RAGAS per sample
 
 
 def _build_judge():
