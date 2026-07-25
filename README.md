@@ -2,6 +2,8 @@
 
 A production-grade RAG chatbot built with **LangGraph**, **Portkey LLM Gateway**, and **Gemini Embeddings**, answering questions from a live-crawled Australian Taxation Office (ATO) knowledge base. The system combines semantic retrieval + reranking, history-aware planning, and NeMo Guardrails for input/output safety — deployed on Azure Container Apps with a GitHub Actions CI/CD pipeline.
 
+**Live**: https://ragchatbot-ui.delightfulwater-01722cef.australiaeast.azurecontainerapps.io/
+
 ## Key Features
 
 - **Agentic Intelligence**: LangGraph for cyclic reasoning, multi-step planning, and conversation memory.
