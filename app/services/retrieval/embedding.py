@@ -14,18 +14,31 @@ _model_type: str | None = None  # "gemini" or "fallback"
 # ── Model initialisation ───────────────────────────────────────────────────────
 
 def _probe_gemini():
-    """Try one embed call to verify Gemini is reachable. Returns model or None."""
-    try:
-        model = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-2-preview",
-            google_api_key=settings.GEMINI_API_KEY,
-        )
-        model.embed_query("probe")
-        logfire.info("Gemini embeddings ready (gemini-embedding-2-preview, 3072-dim).")
-        return model
-    except Exception as e:
-        logfire.warning(f"Gemini probe failed: {e}. Will use sentence-transformers fallback.")
-        return None
+    """Try to verify Gemini is reachable, retrying transient failures before
+    giving up. A single failed probe used to cause permanent fallback to the
+    768-dim local model for the rest of the process — if ingestion and the
+    live backend land on different choices (one Gemini, one fallback), every
+    query silently 400s on a vector-dimension mismatch, and the exception is
+    swallowed by search_enterprise_knowledge's broad except, so the API just
+    returns an ungrounded generic answer instead of an error. Real incident:
+    this happened during a re-ingestion (see notes.md)."""
+    model = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-2-preview",
+        google_api_key=settings.GEMINI_API_KEY,
+    )
+    for attempt in range(3):
+        try:
+            model.embed_query("probe")
+            logfire.info("Gemini embeddings ready (gemini-embedding-2-preview, 3072-dim).")
+            return model
+        except Exception as e:
+            if attempt < 2:
+                wait = 2 ** attempt
+                logfire.warning(f"Gemini probe attempt {attempt + 1}/3 failed: {e}. Retrying in {wait}s.")
+                time.sleep(wait)
+            else:
+                logfire.error(f"Gemini probe failed after 3 attempts: {e}. Falling back to sentence-transformers (768-dim) — check for a Qdrant collection dimension mismatch if this happens during ingestion.")
+                return None
 
 
 def _load_fallback():
