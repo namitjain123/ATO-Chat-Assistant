@@ -185,8 +185,14 @@ python -m app.ingestion.processor DATA/ato_deductions ato --wipe
 uvicorn app.main:app --reload --port 8000
 
 # Terminal 2 — Streamlit UI
-streamlit run app/ui/app.py
+streamlit run app/ui/app.py --server.port 8501
 ```
+
+> Streamlit always defaults to port 8501 regardless of which app you run — it
+> only moves to another port if 8501 is already taken by another running
+> instance at that exact moment. If you plan to run the chat UI and the eval
+> suite (below) at the same time, pin both ports explicitly as shown here,
+> rather than relying on the default to "figure it out."
 
 ### 6. (Optional) Regenerate the golden dataset
 
@@ -200,7 +206,7 @@ python golden_synthetic.py
 
 ```powershell
 # Requires the FastAPI backend running on :8000
-streamlit run evals/app.py
+streamlit run evals/app.py --server.port 8502
 ```
 
 Three tabs: review the golden dataset, run the 75 questions live against the backend, then score the results with RAGAS. Full runs are slow by design (rate-limit-safe pacing) — set `EVAL_SAMPLE_LIMIT=5` before launching to test against a small subset instead of all 75.

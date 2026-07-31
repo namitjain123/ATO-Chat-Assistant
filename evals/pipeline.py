@@ -2,6 +2,7 @@ import time
 import copy
 import json
 import os
+import uuid
 import requests
 import logfire
 
@@ -44,6 +45,16 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
     dataset = copy.deepcopy(golden_dataset)
     samples = dataset["rag_samples"]
     n = len(samples)
+    # thread_id used to be a fixed f"eval_run_{i}" — identical across every
+    # Phase 1 invocation, so the backend's conversational-memory checkpointer
+    # accumulated history across DIFFERENT eval runs (not just within one run).
+    # Once a similar-sounding question had been asked under the same thread_id
+    # in an earlier run, the planner treated new questions as continuations
+    # and skipped retrieval entirely — silently zeroing out actual_contexts
+    # and tanking Context Recall/Precision/Faithfulness for reasons that had
+    # nothing to do with real retrieval quality. Each run now gets its own
+    # unique thread namespace.
+    run_id = uuid.uuid4().hex[:8]
 
     with logfire.span("🚀 Eval Phase 1 — Live Pipeline", total_samples=n):
         for i, sample in enumerate(samples):
@@ -60,7 +71,7 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
                 try:
                     resp = requests.post(
                         API_URL,
-                        json={"q": question, "thread_id": f"eval_run_{i}"},
+                        json={"q": question, "thread_id": f"eval_{run_id}_{i}"},
                         timeout=REQUEST_TIMEOUT,
                     )
                     resp.raise_for_status()

@@ -66,10 +66,21 @@ def _color_score(val):
     return f"background-color: {SCORE_COLORS['red']}"
 
 
+def _format_score(val):
+    # A per-sample judge failure (rate limit, malformed response) is recorded
+    # as None rather than crashing the whole metrics run — but pandas Styler's
+    # format() applies the numeric spec unconditionally, so a bare "{:.3f}"
+    # blows up on that None with a TypeError. Render it as a visible "n/a"
+    # instead of losing the whole table.
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "n/a"
+    return f"{val:.3f}"
+
+
 def _render_metric_table(df: pd.DataFrame, metric_col: str, title: str):
     avg = df[metric_col].mean()
     st.markdown(f"**{title}** — AVG: {_badge(avg)} `{avg:.2f}` {_grade(avg)}")
-    styled = df.style.applymap(_color_score, subset=[metric_col]).format({metric_col: "{:.3f}"})
+    styled = df.style.applymap(_color_score, subset=[metric_col]).format({metric_col: _format_score})
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
