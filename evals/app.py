@@ -19,9 +19,11 @@ import streamlit as st
 
 nest_asyncio.apply()
 
-from evals.pipeline import run_pipeline, load_golden_dataset
+from evals.pipeline import run_pipeline, load_golden_dataset, save_results, get_sample_limit, set_sample_limit
+
+ENRICHED_DATASET_FILE = os.path.join(os.path.dirname(__file__), "enriched_dataset.json")
 from evals.guardrails_eval import run_guardrails_eval, compute_guardrails_metrics
-from evals.metrics import run_all_metrics
+from evals.metrics import run_selected_metrics
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config
@@ -106,6 +108,30 @@ if "pipeline_rows" not in st.session_state:
     st.session_state.pipeline_rows = []
 
 golden = st.session_state.golden
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar — sample limit (persisted to evals/eval_config.json, not a shell env
+# var, so a Streamlit process restart doesn't silently reset it back to "all")
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.subheader("⚙️ Settings")
+    current_limit = get_sample_limit()
+    new_limit = st.number_input(
+        "Sample limit (0 = run all)",
+        min_value=0,
+        value=current_limit or 0,
+        step=1,
+        help="Caps how many golden questions Steps 2/3 use. Saved to disk, "
+             "so it survives a process restart — unlike the old env var approach.",
+    )
+    if st.button("Apply limit", width="stretch"):
+        set_sample_limit(new_limit if new_limit > 0 else None)
+        st.session_state.golden = load_golden_dataset()
+        st.session_state.pipeline_done = False
+        st.session_state.enriched_dataset = None
+        st.session_state.metric_results = None
+        st.rerun()
+    st.caption(f"Currently active: {current_limit or 'all'} samples")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Header
@@ -201,6 +227,16 @@ with tab2:
         disabled=not st.session_state.pipeline_done,
     )
 
+    # A restarted Streamlit process loses all in-memory session_state, which
+    # otherwise forces a full live re-run of Step 2 just to unlock Step 3 —
+    # even though the responses from the last run are still sitting on disk.
+    if not st.session_state.pipeline_done and os.path.exists(ENRICHED_DATASET_FILE):
+        if st.button("📂 Load previous results (no live calls)", width="stretch"):
+            with open(ENRICHED_DATASET_FILE, encoding="utf-8") as f:
+                st.session_state.enriched_dataset = json.load(f)
+            st.session_state.pipeline_done = True
+            st.rerun()
+
     if reset_btn:
         st.session_state.pipeline_done = False
         st.session_state.enriched_dataset = None
@@ -241,9 +277,10 @@ with tab2:
         with logfire.span("🚀 Streamlit — Run Pipeline Button"):
             enriched = run_pipeline(golden, progress_callback=pipeline_cb)
             st.session_state.enriched_dataset = enriched
+            save_results(enriched, ENRICHED_DATASET_FILE)
 
         progress_bar.progress(100, text="✅ All responses collected!")
-        status_slot.success(f"💾 {len(enriched['rag_samples'])} responses stored in session.")
+        status_slot.success(f"💾 {len(enriched['rag_samples'])} responses stored in session and saved to disk.")
 
         # ── Guardrails tests ──────────────────────────────────────────────────
         st.divider()
@@ -345,42 +382,57 @@ with tab3:
             icon="ℹ️",
         )
 
+        metric_display_names = {
+            "faithfulness":      "Exp 1 — Faithfulness",
+            "answer_relevancy":  "Exp 2 — Answer Relevancy",
+            "context_precision": "Exp 3 — Context Precision",
+            "context_recall":    "Exp 4 — Context Recall",
+            "answer_correctness":"Exp 5 — Answer Correctness",
+            "tool_correctness":  "Exp 6 — Tool Correctness",
+        }
+
+        # Lets a partial re-run (e.g. only the metrics that came back "None"
+        # from judge-quota exhaustion) skip the ones that already succeeded,
+        # instead of re-spending limited judge quota on all 6 every time.
+        selected_metrics = st.multiselect(
+            "Metrics to run",
+            options=list(metric_display_names.keys()),
+            default=list(metric_display_names.keys()),
+            format_func=lambda k: metric_display_names[k],
+            help="Narrow this down to just the metrics you need to retry — "
+                 "results for unselected metrics from a previous run are kept as-is.",
+        )
+
         run_metrics_btn = st.button(
             "▶️ Run Eval Metrics",
             type="primary",
-            disabled=not st.session_state.pipeline_done,
+            disabled=not st.session_state.pipeline_done or not selected_metrics,
         )
 
         if run_metrics_btn:
             status_slot = st.empty()
-            results_slots = {}
-
-            metric_display_names = {
-                "faithfulness":      "Exp 1 — Faithfulness",
-                "answer_relevancy":  "Exp 2 — Answer Relevancy",
-                "context_precision": "Exp 3 — Context Precision",
-                "context_recall":    "Exp 4 — Context Recall",
-                "answer_correctness":"Exp 5 — Answer Correctness",
-                "tool_correctness":  "Exp 6 — Tool Correctness",
-            }
-            for key, title in metric_display_names.items():
-                results_slots[key] = st.empty()
+            results_slots = {key: st.empty() for key in selected_metrics}
 
             def status_cb(msg: str):
                 status_slot.info(msg)
 
-            with logfire.span("📊 Streamlit — Run Metrics Button"):
-                metric_results = _run_async(
-                    run_all_metrics(st.session_state.enriched_dataset, status_cb=status_cb)
+            with logfire.span("📊 Streamlit — Run Metrics Button", metrics=selected_metrics):
+                new_results = _run_async(
+                    run_selected_metrics(
+                        st.session_state.enriched_dataset, selected_metrics, status_cb=status_cb
+                    )
                 )
+                # Merge into whatever's already there — unselected metrics from
+                # an earlier run stay untouched rather than being wiped out.
+                metric_results = {**(st.session_state.metric_results or {}), **new_results}
                 st.session_state.metric_results = metric_results
 
-            status_slot.success("✅ All 6 experiments complete!")
+            status_slot.success(f"✅ {len(new_results)}/{len(selected_metrics)} selected experiments complete!")
 
-            for key, title in metric_display_names.items():
-                if key in metric_results:
+            for key in selected_metrics:
+                if key in new_results:
                     with results_slots[key].container():
-                        _render_metric_table(metric_results[key], key, title)
+                        _render_metric_table(new_results[key], key, metric_display_names[key])
 
         elif st.session_state.metric_results:
             st.success("✅ Metrics already computed. Showing results below.")

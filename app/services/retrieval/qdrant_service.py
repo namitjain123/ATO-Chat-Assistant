@@ -3,6 +3,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from app.config import settings
 from app.services.retrieval.embedding import embed_query
+from app.services.cache import cache_get_retrieval, cache_set_retrieval
 
 
 # Initialize Qdrant Client
@@ -16,6 +17,10 @@ def search_enterprise_knowledge(query: str, limit: int = 8):
     Performs a high-precision search in the enterprise knowledge base.
     Uses the modern query_points interface.
     """
+    cached = cache_get_retrieval(query, limit)
+    if cached is not None:
+        return cached
+
     try:
         query_vector = embed_query(query)
 
@@ -34,7 +39,8 @@ def search_enterprise_knowledge(query: str, limit: int = 8):
                 "source": res.payload.get("source", "Unknown"),
                 "score": res.score
             })
-        
+
+        cache_set_retrieval(query, limit, results)
         return results
     except Exception as e:
         logfire.error(f"❌ Qdrant Search Failed: {e}")

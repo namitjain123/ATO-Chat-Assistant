@@ -99,10 +99,20 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
 # ── Public API (same signatures as before) ─────────────────────────────────────
 
 def embed_query(query: str) -> list[float]:
+    from app.services.cache import cache_get_embedding, cache_set_embedding
+
+    cached = cache_get_embedding(query)
+    if cached is not None:
+        return cached
+
     _init()
     if _model_type == "gemini":
-        return _active_model.embed_query(query)
-    return _active_model.encode([query])[0].tolist()
+        vector = _active_model.embed_query(query)
+    else:
+        vector = _active_model.encode([query])[0].tolist()
+
+    cache_set_embedding(query, vector)
+    return vector
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:

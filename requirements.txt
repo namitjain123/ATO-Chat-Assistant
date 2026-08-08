@@ -48,3 +48,6 @@ sentence-transformers
 langchain_google_genai
 
 langchain-google-vertexai
+
+redis
+cachetools

@@ -1,0 +1,19 @@
+# Local-dev only. Redis is the L2 (shared) layer of the two-layer cache in
+# app/services/cache.py — the app degrades gracefully to L1-only (in-process)
+# if this isn't running, so it's optional, not required to start the backend.
+#
+# Usage:
+#   docker compose up -d redis
+#   uvicorn app.main:app --reload --port 8000
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rag-cache-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+
+volumes:
+  redis-data:

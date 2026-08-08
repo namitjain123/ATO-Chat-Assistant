@@ -50,10 +50,11 @@ def _build_judge():
     api_key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
     client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
     # openai/gpt-oss-20b is a reasoning model — it spends tokens on internal reasoning
-    # before writing the final JSON; the default max_tokens=1024 was too small and
-    # caused truncated/invalid JSON ("max completion tokens reached before generating
-    # a valid document"). Give it more headroom.
-    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client, max_tokens=4096)
+    # before writing the final JSON. 4096 was already raised once (from a 1024 default
+    # that caused truncated/invalid JSON) but still isn't enough headroom for some
+    # calls — confirmed via Logfire: "InstructorRetryException: Failed to validate
+    # JSON" on Faithfulness's statement-generation step for a longer response.
+    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client, max_tokens=8192)
     embeddings = HuggingFaceEmbeddings(
         model="sentence-transformers/all-MiniLM-L6-v2",
         use_api=False,
@@ -114,165 +115,146 @@ async def _batched_score(metric, inputs: list, samples: list, status_cb=None, la
         try:
             scores = await metric.abatch_score(batch)
         except Exception as e:
+            # Previously only sent to status_cb (the Streamlit page text, which
+            # gets overwritten by the next status update and is never
+            # persisted) — meaning a failed sample's actual reason was
+            # unrecoverable after the fact, even in Logfire. Log it properly
+            # so "why did sample N come back None" is traceable later.
+            batch_samples = samples[len(all_scores): len(all_scores) + len(batch)]
+            questions = [s["question"][:80] for s in batch_samples]
+            logfire.error(
+                f"{label} batch {b_idx} failed: {type(e).__name__}: {e}",
+                metric=label,
+                batch_index=b_idx,
+                questions=questions,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
             if status_cb:
                 status_cb(f"⚠️ {label} batch {b_idx} failed ({type(e).__name__}) — recording as skipped.")
             scores = [None] * len(batch)
         all_scores.extend(scores)
     return all_scores
 
-async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
-    """
-    Runs all 6 experiments. Returns dict keyed by metric name → DataFrame.
-    status_cb(message: str) is called for live UI updates.
-    """
-    judge_llm, ragas_embeddings = _build_judge()
-    samples = _prep_samples(golden_dataset)
+# Ordered so numbering in status messages ("Exp N/M") stays meaningful
+# regardless of which subset is selected. Tool Correctness has no LLM call —
+# it's a pure Jaccard similarity, so it's handled separately (never fails,
+# never needs re-running for quota reasons).
+METRIC_ORDER = [
+    "faithfulness",
+    "answer_relevancy",
+    "context_precision",
+    "context_recall",
+    "answer_correctness",
+]
+METRIC_TITLES = {
+    "faithfulness": "Faithfulness",
+    "answer_relevancy": "Answer Relevancy",
+    "context_precision": "Context Precision",
+    "context_recall": "Context Recall",
+    "answer_correctness": "Answer Correctness",
+    "tool_correctness": "Tool Correctness",
+}
 
+
+def _build_inputs(metric_key: str, samples: list) -> list:
+    if metric_key == "faithfulness":
+        return [
+            {"user_input": s["question"], "response": s["actual_response"], "retrieved_contexts": s["actual_contexts"]}
+            for s in samples
+        ]
+    if metric_key == "answer_relevancy":
+        return [{"user_input": s["question"], "response": s["actual_response"]} for s in samples]
+    if metric_key in ("context_precision", "context_recall"):
+        return [
+            {"user_input": s["question"], "reference": s["reference"], "retrieved_contexts": s["actual_contexts"]}
+            for s in samples
+        ]
+    if metric_key == "answer_correctness":
+        return [
+            {"user_input": s["question"], "response": s["actual_response"], "reference": s["reference"]}
+            for s in samples
+        ]
+    raise ValueError(f"Unknown metric key: {metric_key}")
+
+
+def _build_metric(metric_key: str, judge_llm, ragas_embeddings):
+    if metric_key == "faithfulness":
+        return Faithfulness(llm=judge_llm)
+    if metric_key == "answer_relevancy":
+        return AnswerRelevancy(llm=judge_llm, embeddings=ragas_embeddings)
+    if metric_key == "context_precision":
+        return ContextPrecision(llm=judge_llm)
+    if metric_key == "context_recall":
+        return ContextRecall(llm=judge_llm)
+    if metric_key == "answer_correctness":
+        return AnswerCorrectness(llm=judge_llm, embeddings=ragas_embeddings)
+    raise ValueError(f"Unknown metric key: {metric_key}")
+
+
+async def run_selected_metrics(golden_dataset: dict, metric_keys: list[str], status_cb=None) -> dict:
+    """
+    Runs only the given LLM-judged metrics (any subset of METRIC_ORDER), plus
+    Tool Correctness if requested — lets a partial re-run (e.g. just the ones
+    that came back None from judge-quota exhaustion) skip the experiments that
+    already succeeded, instead of re-spending quota on all 6 every time.
+    Returns dict keyed by metric name → DataFrame (only for the requested keys).
+    """
+    samples = _prep_samples(golden_dataset)
     if not samples:
         raise ValueError("No samples with actual_response found. Run Phase 1 first.")
 
+    llm_keys = [k for k in metric_keys if k in METRIC_ORDER]
+    want_tool_correctness = "tool_correctness" in metric_keys
+
     results = {}
+    judge_llm, ragas_embeddings = _build_judge() if llm_keys else (None, None)
+    n_total = len(llm_keys) + (1 if want_tool_correctness else 0)
 
-    with logfire.span("🧪 Eval Phase 2 — All Metrics", total_samples=len(samples)):
-
-        # ── Exp 1: Faithfulness ───────────────────────────────────────────────
-        if status_cb:
-            status_cb(f"🧪 Exp 1/6 — Faithfulness ({len(samples)} samples)...")
-        try:
-            with logfire.span("🧪 Exp 1 — Faithfulness"):
-                inputs = [
-                    {
-                        "user_input": s["question"],
-                        "response": s["actual_response"],
-                        "retrieved_contexts": s["actual_contexts"],
-                    }
-                    for s in samples
-                ]
-                scores = await _batched_score(Faithfulness(llm=judge_llm), inputs, samples, status_cb, "Faithfulness")
-                df = _score_df("faithfulness", samples, scores)
-                results["faithfulness"] = df
-                logfire.info("🧪 Faithfulness done", avg=round(df["faithfulness"].mean(), 3))
-        except Exception as e:
+    with logfire.span("🧪 Eval Phase 2 — Selected Metrics", total_samples=len(samples), metrics=metric_keys):
+        for i, key in enumerate(llm_keys, start=1):
+            title = METRIC_TITLES[key]
             if status_cb:
-                status_cb(f"❌ Exp 1/6 — Faithfulness failed entirely ({type(e).__name__}): {e}")
-            logfire.error(f"Faithfulness experiment failed: {e}")
+                status_cb(f"🧪 {i}/{n_total} — {title} ({len(samples)} samples)...")
+            try:
+                with logfire.span(f"🧪 {title}"):
+                    inputs = _build_inputs(key, samples)
+                    metric = _build_metric(key, judge_llm, ragas_embeddings)
+                    scores = await _batched_score(metric, inputs, samples, status_cb, title)
+                    df = _score_df(key, samples, scores)
+                    results[key] = df
+                    logfire.info(f"🧪 {title} done", avg=round(df[key].mean(), 3))
+            except Exception as e:
+                if status_cb:
+                    status_cb(f"❌ {i}/{n_total} — {title} failed entirely ({type(e).__name__}): {e}")
+                logfire.error(f"{title} experiment failed: {e}")
 
-        await _cooldown(COOLDOWN_STANDARD, "Faithfulness", status_cb)
+            if i < n_total:
+                await _cooldown(COOLDOWN_STANDARD, title, status_cb)
 
-        # ── Exp 2: Answer Relevancy ───────────────────────────────────────────
-        if status_cb:
-            status_cb(f"🧪 Exp 2/6 — Answer Relevancy ({len(samples)} samples)...")
-        try:
-            with logfire.span("🧪 Exp 2 — Answer Relevancy"):
-                inputs = [
-                    {"user_input": s["question"], "response": s["actual_response"]}
-                    for s in samples
-                ]
-                scores = await _batched_score(
-                    AnswerRelevancy(llm=judge_llm, embeddings=ragas_embeddings),
-                    inputs, samples, status_cb, "Answer Relevancy"
-                )
-                df = _score_df("answer_relevancy", samples, scores)
-                results["answer_relevancy"] = df
-                logfire.info("🧪 Answer Relevancy done", avg=round(df["answer_relevancy"].mean(), 3))
-        except Exception as e:
+        if want_tool_correctness:
             if status_cb:
-                status_cb(f"❌ Exp 2/6 — Answer Relevancy failed entirely ({type(e).__name__}): {e}")
-            logfire.error(f"Answer Relevancy experiment failed: {e}")
-
-        await _cooldown(COOLDOWN_STANDARD, "Answer Relevancy", status_cb)
-
-        # ── Exp 3: Context Precision ──────────────────────────────────────────
-        if status_cb:
-            status_cb(f"🧪 Exp 3/6 — Context Precision ({len(samples)} samples)...")
-        try:
-            with logfire.span("🧪 Exp 3 — Context Precision"):
-                inputs = [
-                    {
-                        "user_input": s["question"],
-                        "reference": s["reference"],
-                        "retrieved_contexts": s["actual_contexts"],
-                    }
-                    for s in samples
-                ]
-                scores = await _batched_score(ContextPrecision(llm=judge_llm), inputs, samples, status_cb, "Context Precision")
-                df = _score_df("context_precision", samples, scores)
-                results["context_precision"] = df
-                logfire.info("🧪 Context Precision done", avg=round(df["context_precision"].mean(), 3))
-        except Exception as e:
-            if status_cb:
-                status_cb(f"❌ Exp 3/6 — Context Precision failed entirely ({type(e).__name__}): {e}")
-            logfire.error(f"Context Precision experiment failed: {e}")
-
-        await _cooldown(COOLDOWN_STANDARD, "Context Precision", status_cb)
-
-        # ── Exp 4: Context Recall ─────────────────────────────────────────────
-        if status_cb:
-            status_cb(f"🧪 Exp 4/6 — Context Recall ({len(samples)} samples)...")
-        try:
-            with logfire.span("🧪 Exp 4 — Context Recall"):
-                inputs = [
-                    {
-                        "user_input": s["question"],
-                        "reference": s["reference"],
-                        "retrieved_contexts": s["actual_contexts"],
-                    }
-                    for s in samples
-                ]
-                scores = await _batched_score(ContextRecall(llm=judge_llm), inputs, samples, status_cb, "Context Recall")
-                df = _score_df("context_recall", samples, scores)
-                results["context_recall"] = df
-                logfire.info("🧪 Context Recall done", avg=round(df["context_recall"].mean(), 3))
-        except Exception as e:
-            if status_cb:
-                status_cb(f"❌ Exp 4/6 — Context Recall failed entirely ({type(e).__name__}): {e}")
-            logfire.error(f"Context Recall experiment failed: {e}")
-
-        await _cooldown(COOLDOWN_STANDARD, "Context Recall", status_cb)
-
-        # ── Exp 5: Answer Correctness (split into batches) ────────────────────
-        if status_cb:
-            status_cb(f"🧪 Exp 5/6 — Answer Correctness batch 1/2...")
-        try:
-            with logfire.span("🧪 Exp 5 — Answer Correctness"):
-                inputs = [
-                    {
-                        "user_input": s["question"],
-                        "response": s["actual_response"],
-                        "reference": s["reference"],
-                    }
-                    for s in samples
-                ]
-                all_scores = await _batched_score(
-                    AnswerCorrectness(llm=judge_llm, embeddings=ragas_embeddings),
-                    inputs, samples, status_cb, "Answer Correctness"
-                )
-                df = _score_df("answer_correctness", samples, all_scores)
-                results["answer_correctness"] = df
-                logfire.info("🧪 Answer Correctness done", avg=round(df["answer_correctness"].mean(), 3))
-        except Exception as e:
-            if status_cb:
-                status_cb(f"❌ Exp 5/6 — Answer Correctness failed entirely ({type(e).__name__}): {e}")
-            logfire.error(f"Answer Correctness experiment failed: {e}")
-
-        await _cooldown(COOLDOWN_STANDARD, "Answer Correctness", status_cb)
-
-        # ── Exp 6: Tool Correctness (no LLM — Jaccard) ───────────────────────
-        if status_cb:
-            status_cb("⚡ Exp 6/6 — Tool Correctness (zero LLM calls)...")
-        with logfire.span("🧪 Exp 6 — Tool Correctness"):
-            tool_rows = []
-            for s in samples:
-                called = set(s.get("actual_tools_called") or [])
-                expected = set(s.get("expected_tools") or [])
-                union = len(called | expected)
-                score = len(called & expected) / union if union > 0 else 0.0
-                tool_rows.append({"question": s["question"][:65], "tool_correctness": round(score, 3)})
-            df = pd.DataFrame(tool_rows)
-            results["tool_correctness"] = df
-            logfire.info("🧪 Tool Correctness done", avg=round(df["tool_correctness"].mean(), 3))
+                status_cb(f"⚡ {n_total}/{n_total} — Tool Correctness (zero LLM calls)...")
+            with logfire.span("🧪 Tool Correctness"):
+                tool_rows = []
+                for s in samples:
+                    called = set(s.get("actual_tools_called") or [])
+                    expected = set(s.get("expected_tools") or [])
+                    union = len(called | expected)
+                    score = len(called & expected) / union if union > 0 else 0.0
+                    tool_rows.append({"question": s["question"][:65], "tool_correctness": round(score, 3)})
+                df = pd.DataFrame(tool_rows)
+                results["tool_correctness"] = df
+                logfire.info("🧪 Tool Correctness done", avg=round(df["tool_correctness"].mean(), 3))
 
         if status_cb:
-            status_cb("✅ All 6 experiments complete!")
+            status_cb(f"✅ {len(results)}/{len(metric_keys)} requested experiments complete!")
 
     return results
+
+
+async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
+    """Runs all 6 experiments. Returns dict keyed by metric name → DataFrame."""
+    return await run_selected_metrics(
+        golden_dataset, METRIC_ORDER + ["tool_correctness"], status_cb=status_cb
+    )

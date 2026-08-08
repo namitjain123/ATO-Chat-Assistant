@@ -18,6 +18,9 @@ class Settings:
     GROQ_MODEL = "llama-3.3-70b-versatile"
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
+    # --- CACHE (REDIS, L2 — see app/services/cache.py) ---
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
     # --- LLM GATEWAY (PORTKEY) ---
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
     PORTKEY_CONFIG_SLUG = os.getenv("PORTKEY_CONFIG_SLUG")  # saved config slug, e.g. "pc-xxxxxxxx"

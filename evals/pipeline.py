@@ -118,16 +118,34 @@ def save_results(dataset: dict, path: str) -> None:
         json.dump(dataset, f, indent=2, ensure_ascii=False)
 
 
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "eval_config.json")
+
+
+def get_sample_limit() -> int | None:
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            n = json.load(f).get("sample_limit")
+            if isinstance(n, int) and n > 0:
+                return n
+    return None
+
+
+def set_sample_limit(n: int | None) -> None:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"sample_limit": n}, f)
+
+
 def load_golden_dataset() -> dict:
     golden_path = os.path.join(os.path.dirname(__file__), "golden_dataset.json")
     with open(golden_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # Optional cap for a quick demo run — set EVAL_SAMPLE_LIMIT=5 to only run the
-    # first 5 golden questions through the live pipeline instead of all 75.
-    limit = os.getenv("EVAL_SAMPLE_LIMIT")
-    if limit and limit.isdigit():
-        n = int(limit)
+    # Optional cap for a quick demo run instead of the full golden set. Stored
+    # in eval_config.json (not just an EVAL_SAMPLE_LIMIT env var) because a
+    # Streamlit process restart wipes shell env vars set via a one-off
+    # `$env:X = ...; Start-Process ...` — this file survives that.
+    n = get_sample_limit()
+    if n:
         data["rag_samples"] = data["rag_samples"][:n]
 
     return data
