@@ -1,4 +1,5 @@
 .env
+azure_sp_credentials.json
 .venv/
 .logfire/
 __pycache__/DATA/

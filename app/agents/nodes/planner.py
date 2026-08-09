@@ -1,10 +1,7 @@
 from pydantic import BaseModel, Field
 from app.agents.state import AgentState
-from app.gateway.client import get_langchain_llm
+from app.gateway.client import get_structured_llm_with_fallback
 import logfire
-
-# Portkey-backed LLM: fallback + cache + retry — same .invoke() interface as ChatGroq
-llm = get_langchain_llm(feature="planner")
 
 
 class PlannerDecision(BaseModel):
@@ -21,9 +18,14 @@ class PlannerDecision(BaseModel):
     )
 
 
+# Portkey-backed, primary/fallback chain (Azure OpenAI primary, Groq fallbacks —
+# see app/gateway/client.py for why fallback is applied at the application level
+# rather than via Portkey's own server-side fallback strategy).
 # function_calling (tool-calling) rather than the default json_schema mode — Groq's
-# llama models don't support OpenAI's native structured-output response format.
-structured_llm = llm.with_structured_output(PlannerDecision, method="function_calling")
+# llama models don't support OpenAI's native structured-output response format;
+# Azure's gpt-5-mini supports both, so function_calling is used for all targets
+# for consistency.
+structured_llm = get_structured_llm_with_fallback(PlannerDecision, feature="planner", method="function_calling")
 
 
 def planner_node(state: AgentState):

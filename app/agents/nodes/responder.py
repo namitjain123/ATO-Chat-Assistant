@@ -1,6 +1,6 @@
 import logfire
 from app.agents.state import AgentState
-from app.gateway.client import portkey_client, extract_cache_status
+from app.gateway.client import create_completion_with_fallback, extract_cache_status
 
 
 def generate_node(state: AgentState):
@@ -59,9 +59,11 @@ def generate_node(state: AgentState):
 
     with logfire.span("✍️ LLM Synthesis"):
         try:
-            response = portkey_client.chat.completions.create(
+            # Application-level primary/fallback (Azure OpenAI -> Groq) — see
+            # app/gateway/client.py for why this isn't Portkey's own server-side
+            # fallback strategy (confirmed broken for Azure targets specifically).
+            response = create_completion_with_fallback(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
             )
             content = response.choices[0].message.content
             cache_status = extract_cache_status(response)
