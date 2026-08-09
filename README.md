@@ -2,11 +2,9 @@
 
 A production-grade RAG chatbot built with **LangGraph**, **Azure OpenAI + Groq via Portkey LLM Gateway**, and **Gemini Embeddings**, answering questions from a live-crawled Australian Taxation Office (ATO) knowledge base. The system combines semantic retrieval + reranking, history-aware planning, and NeMo Guardrails for input/output safety — deployed on Azure Container Apps with a GitHub Actions CI/CD pipeline.
 
-> **Live URL below reflects the deployment as of its last image build.** The
-> Azure OpenAI primary/Groq fallback change described in [LLM Provider](#llm-provider-azure-openai-primary-groq-automatic-fallback)
-> is verified working locally; redeploying it live is a separate, explicit step (rebuild + push a new image) — see that section for exactly what's shipped where.
+**Live**: https://ragchatbot-ui.delightfulwater-01722cef.australiaeast.azurecontainerapps.io/ — running Azure OpenAI as primary LLM, Groq as automatic fallback (see [LLM Provider](#llm-provider-azure-openai-primary-groq-automatic-fallback) for the full story and how failover was verified).
 
-**Live**: https://ragchatbot-ui.delightfulwater-01722cef.australiaeast.azurecontainerapps.io/
+![Chat UI](images/chat_ui.png)
 
 ## Key Features
 
@@ -64,6 +62,23 @@ evals/                → Phase 1: runs those 75 questions through the live back
 
 Run `python crawl.py` to (re-)crawl a source, `python -m app.ingestion.processor DATA/<folder> <tag> --wipe` to index it, and `python golden_synthetic.py` to regenerate the eval's golden dataset from whatever's currently crawled.
 
+### Evaluation Results
+
+Real numbers from the eval suite, captured against the live deployed instance after the Azure OpenAI migration:
+
+![Final Summary](images/final_summary.png)
+
+Faithfulness and Tool Correctness both perfect, Context Recall and Answer Correctness solidly "Good," Context Precision "Fair" — the one metric with room to improve. The per-sample breakdown below is left in, "None" cells included, deliberately: a couple of Faithfulness/Answer Correctness samples came back `None` in this run from the judge model (`openai/gpt-oss-20b` on Groq) hitting its daily quota mid-run — a real, known constraint of running eval judging on a free tier, not silently hidden.
+
+<details>
+<summary>Per-sample metric breakdown</summary>
+
+![Faithfulness and Answer Relevancy](images/faithfulness.png)
+![Context Precision and Context Recall](images/context_precision.png)
+![Answer Correctness and Tool Correctness](images/answer_correctness.png)
+
+</details>
+
 ---
 
 ## LLM Provider: Azure OpenAI (primary), Groq (automatic fallback)
@@ -97,10 +112,11 @@ Getting Azure genuinely answering as primary — not silently falling back to Gr
 
 ### How failover was actually verified, not just assumed
 
-Two separate, real tests — not code review, actual forced runs:
+Three separate, real tests — not code review, actual forced runs:
 
-- **Normal operation**: confirmed the response model is genuinely `gpt-5-mini-2025-08-07` (Azure), not a Groq model name, across multiple live `/query` calls.
-- **Forced failure**: temporarily swapped in a Portkey integration slug that doesn't exist at all (no "default model" safety net to mask the test), called `create_completion_with_fallback` directly, confirmed the failure was caught and logged (`Target ... failed`), and that it correctly fell through to Groq — response model `llama-3.3-70b-versatile`, real content returned.
+- **Normal operation (local)**: confirmed the response model is genuinely `gpt-5-mini-2025-08-07` (Azure), not a Groq model name, across multiple live `/query` calls.
+- **Forced failure (local)**: temporarily swapped in a Portkey integration slug that doesn't exist at all (no "default model" safety net to mask the test), called `create_completion_with_fallback` directly, confirmed the failure was caught and logged (`Target ... failed`), and that it correctly fell through to Groq — response model `llama-3.3-70b-versatile`, real content returned.
+- **Normal operation (deployed)**: after redeploying via CI/CD, confirmed the same result holds on the live Container App, not just on a laptop — see the eval screenshots below for real scores captured against the deployed instance.
 
 ### Cost note
 
@@ -282,12 +298,4 @@ Three tabs: review the golden dataset, run the questions live against the backen
 
 Deployed on **Azure Container Apps**: a backend Container App (FastAPI + LangGraph, 1 vCPU/2 GiB), a lean Streamlit UI Container App, and a Postgres Flexible Server for durable conversation memory — all built and pushed by a GitHub Actions workflow (`.github/workflows/`) on every push to `main`. See `Dockerfile` / `Dockerfile.ui` for the two images.
 
-> **Current state**: the backend Container App's secrets/env vars already
-> include the Azure OpenAI values (`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`,
-> `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT`), but the running
-> container image predates the code changes in
-> [LLM Provider](#llm-provider-azure-openai-primary-groq-automatic-fallback) —
-> setting secrets doesn't rebuild the image. The live URL above reflects
-> whatever image was last built and pushed; it does not yet reflect the
-> Azure-primary/Groq-fallback change until the next `git push` triggers a
-> fresh build via CI/CD.
+The CI/CD pipeline builds both images, pushes them to ACR, then explicitly redeploys both Container Apps (`az containerapp update`) — pushing to ACR alone doesn't redeploy a running app, and an update call with an unchanged image tag doesn't reliably force a fresh pull either, so each deploy step uses a unique `--revision-suffix` (the GitHub Actions run number) to guarantee a genuinely new revision every time. Verified end-to-end: the [LLM Provider](#llm-provider-azure-openai-primary-groq-automatic-fallback) change is confirmed live at the URL above.

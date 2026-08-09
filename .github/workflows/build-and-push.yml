@@ -37,11 +37,16 @@ jobs:
       # Pushing to ACR alone does NOT redeploy the running Container Apps —
       # they only pick up a new image when explicitly told to via an update
       # call. Without this, the live app can silently keep running an old
-      # image indefinitely even after every push "succeeds." The image tag
-      # here is static (:v1), so `containerapp update` is what actually
-      # forces a new revision — it always creates one when called, even if
-      # the tag string is unchanged, because it re-resolves the tag to
-      # whatever digest was just pushed.
+      # image indefinitely even after every push "succeeds."
+      #
+      # --revision-suffix is required here, not optional: the image tag is
+      # static (:v1), and verified directly that `containerapp update
+      # --image <same tag string>` is treated as a no-op when the tag string
+      # hasn't changed — it does NOT re-resolve the tag to the newly-pushed
+      # digest, and creates no new revision, even though the run reports
+      # "succeeded." Giving each deploy a unique suffix (the run number)
+      # forces Azure to actually create a fresh revision and pull the image
+      # again every time.
       - name: Log in to Azure
         uses: azure/login@v2
         with:
@@ -54,7 +59,8 @@ jobs:
             az containerapp update \
               --name ragchatbot \
               --resource-group todoapp-rg \
-              --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-backend:v1
+              --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-backend:v1 \
+              --revision-suffix run${{ github.run_number }}
 
       - name: Deploy UI to Container Apps
         uses: azure/cli@v2
@@ -63,4 +69,5 @@ jobs:
             az containerapp update \
               --name ragchatbot-ui \
               --resource-group todoapp-rg \
-              --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-ui:v1
+              --image ${{ secrets.ACR_LOGIN_SERVER }}/chatbot-ui:v1 \
+              --revision-suffix run${{ github.run_number }}
