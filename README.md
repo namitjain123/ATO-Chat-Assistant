@@ -302,6 +302,13 @@ streamlit run evals/app.py --server.port 8502
 
 Three tabs: review the golden dataset, run the questions live against the backend, then score the results with RAGAS. Full runs are slow by design (rate-limit-safe pacing) — set a sample limit via the "⚙️ Settings" panel in the app's sidebar (persisted to `evals/eval_config.json`, survives process restarts) to test against a small subset instead of the full golden set. The Step 3 metrics tab also lets you re-run just a subset of the 6 metrics, rather than all 6, to conserve judge-model quota on a partial retry.
 
+To test the **deployed** backend instead of a local one, set `EVAL_TARGET_URL` before launching (Step 2's tab shows which target is active either way):
+
+```powershell
+$env:EVAL_TARGET_URL = "https://ragchatbot.delightfulwater-01722cef.australiaeast.azurecontainerapps.io/query"
+streamlit run evals/app.py --server.port 8502
+```
+
 ---
 
 ## Deployment

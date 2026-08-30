@@ -19,6 +19,7 @@ import streamlit as st
 
 nest_asyncio.apply()
 
+import evals.pipeline as pipeline_module
 from evals.pipeline import run_pipeline, load_golden_dataset, save_results, get_sample_limit, set_sample_limit
 
 ENRICHED_DATASET_FILE = os.path.join(os.path.dirname(__file__), "enriched_dataset.json")
@@ -204,15 +205,24 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("Live Pipeline — Collect Real Responses")
+    is_local_target = "localhost" in pipeline_module.API_URL or "127.0.0.1" in pipeline_module.API_URL
     st.markdown(
-        "Sends each golden question to your **running FastAPI app** (`localhost:8000/query`). "
-        "Captures the actual response, retrieved contexts, and tool called. "
-        "Responses are truncated to 300 chars to save tokens for the RAGAS judging step."
+        f"Sends each golden question to `{pipeline_module.API_URL}`. "
+        "Captures the actual response, retrieved contexts, and tool called."
     )
-    st.info(
-        "⚠️ Make sure your FastAPI backend is running first: `uvicorn app.main:app --reload --port 8000`",
-        icon="⚠️",
-    )
+    if is_local_target:
+        st.info(
+            "🖥️ Targeting **local** backend. Make sure it's running: "
+            "`uvicorn app.main:app --reload --port 8000`. "
+            "To test the deployed instance instead, set `EVAL_TARGET_URL` before launching this app.",
+            icon="🖥️",
+        )
+    else:
+        st.warning(
+            f"🌐 Targeting a **remote/deployed** backend ({pipeline_module.API_URL}) — "
+            "real requests, real quota usage against that instance.",
+            icon="🌐",
+        )
 
     col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
     run_pipeline_btn = col_p1.button(

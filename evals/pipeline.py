@@ -6,7 +6,11 @@ import uuid
 import requests
 import logfire
 
-API_URL = "http://localhost:8000/query"
+# Defaults to local; set EVAL_TARGET_URL to point Phase 1 at a deployed
+# backend instead (e.g. the live Azure Container App) — same golden dataset,
+# same scoring, just testing the real deployed instance rather than a
+# laptop. No code change needed to switch back: unset the env var.
+API_URL = os.getenv("EVAL_TARGET_URL", "http://localhost:8000/query")
 # Safety cap only (e.g. a runaway/looping completion) — NOT a display truncation.
 # Real answers were previously hard-cut at 300 chars, which fed Phase 2's Faithfulness
 # and Answer Correctness metrics a broken, incomplete sentence and unfairly tanked
