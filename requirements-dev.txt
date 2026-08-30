@@ -1,0 +1,12 @@
+# Dev/test-only dependencies — deliberately kept out of requirements.txt so
+# the deployed Docker images (Dockerfile, Dockerfile.ui) don't carry them.
+# crawl4ai in particular wraps browser automation (Playwright) and is heavy;
+# the live app never imports it, only the standalone crawl.py script does,
+# which tests/test_crawl_utils.py imports transitively.
+-r requirements.txt
+
+pytest
+pytest-mock
+httpx
+
+crawl4ai==0.9.0

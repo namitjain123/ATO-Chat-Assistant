@@ -51,7 +51,3 @@ langchain-google-vertexai
 
 redis
 cachetools
-
-pytest
-pytest-mock
-httpx

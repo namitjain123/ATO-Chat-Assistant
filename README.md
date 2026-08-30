@@ -185,6 +185,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+To also run the test suite (`pytest`), install `requirements-dev.txt` instead — it includes everything in `requirements.txt` plus test-only tooling (pytest, crawl4ai for `tests/test_crawl_utils.py`) that's deliberately kept out of the main file so the deployed Docker images don't carry it:
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
 ### 2. Configure environment
 
 Create a `.env` file with the following keys:
