@@ -6,7 +6,29 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # No secrets needed here — verified directly that every module the
+      # test suite imports (app.gateway.client, app.services.cache, crawl,
+      # evals.pipeline, app.ingestion.chunking.splitter) loads cleanly with
+      # zero API keys set. Tests mock any external client calls rather than
+      # hitting real APIs.
+      - name: Run tests
+        run: pytest
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

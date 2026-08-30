@@ -19,6 +19,7 @@ A production-grade RAG chatbot built with **LangGraph**, **Azure OpenAI + Groq v
 - **Observability**: Full trace nesting with **Pydantic Logfire** and **LangSmith** across every agent node.
 - **Evaluation Suite**: Auto-generated golden Q&A dataset (via `deepeval`) + a RAGAS-powered eval pipeline (6 metrics) with a dedicated Streamlit demo app.
 - **Cloud Deployment**: Azure Container Apps (backend + UI), Postgres Flexible Server, and a GitHub Actions pipeline that builds both images on every push.
+- **Test Suite**: `pytest` unit tests covering the pieces most worth pinning down — chunking (a real bug regression guard), the two-layer cache, crawl boilerplate-stripping, and the Azure/Groq fallback logic (mocked, no network calls) — run as a required CI gate before every build/deploy.
 
 ---
 
@@ -131,24 +132,26 @@ Azure OpenAI has no free tier — unlike everything else in this project's stack
 │   ├── agents/
 │   │   ├── graph.py     # LangGraph state machine + checkpointer (Postgres / in-memory)
 │   │   └── nodes/       # Planner, Retriever, Responder LangGraph nodes
-│   ├── gateway/         # Portkey LLM gateway — primary + fallback Groq routing, caching
+│   ├── gateway/         # Portkey LLM gateway — Azure OpenAI primary, Groq automatic fallback, caching
 │   ├── guardrails/      # NeMo Guardrails input/output filtering (Llama 3.3 70B + FastEmbed)
 │   ├── ingestion/
 │   │   ├── chunking/    # Paragraph-based text splitter (~1500 char target)
 │   │   └── loaders/     # Local parsers — PDF (pypdf), HTML, TXT/MD, DOCX, PPTX
 │   ├── services/
+│   │   ├── cache.py     # Two-layer (in-process + Redis) cache for embeddings/retrieval
 │   │   └── retrieval/   # Gemini embeddings + Qdrant search + FlashRank reranking
 │   ├── ui/              # Streamlit chat interface with reasoning step transparency
 │   ├── config.py        # Centralized environment variable management
 │   └── main.py          # FastAPI entrypoint — guardrails gate + /query endpoint
 ├── evals/               # Golden-dataset pipeline, RAGAS eval suite, Streamlit 3-tab demo
+├── tests/                # pytest unit tests — chunking, cache, crawl utils, LLM fallback
 ├── crawl.py              # Deep-crawls a live source site into DATA/<name>/
 ├── golden_synthetic.py   # Generates evals/golden_dataset.json from crawled docs
 ├── processed_data/       # Auto-generated — parsed & chunked JSON output per document
 ├── DATA/                 # Crawled source pages (git-ignored; regenerate with crawl.py)
 ├── Dockerfile            # Backend image
 ├── Dockerfile.ui          # Streamlit UI image (lean — no ML deps)
-├── .github/workflows/     # CI — builds & pushes both images to ACR on every push
+├── .github/workflows/     # CI — runs tests, then builds/pushes/deploys both images on every push
 └── requirements.txt      # Pinned dependencies
 ```
 

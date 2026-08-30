@@ -33,8 +33,8 @@ GATEWAY_CONFIG = {
     },
     "targets": [
         {"override_params": {"model": f"@{settings.AZURE_SLUG}/{settings.AZURE_OPENAI_DEPLOYMENT}"}},
-        {"override_params": {"model": f"@{settings.GROQ_SLUG}/llama-3.3-70b-versatile"}},
-        {"override_params": {"model": f"@{settings.GROQ_SLUG_2}/llama-3.1-8b-instant"}},
+        {"override_params": {"model": f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b"}},
+        {"override_params": {"model": f"@{settings.GROQ_SLUG_2}/openai/gpt-oss-20b"}},
     ]
 }
 
@@ -63,15 +63,25 @@ portkey_client_direct = Portkey(api_key=settings.PORTKEY_API_KEY)
 # fallback strategy for Azure specifically (see comment above GATEWAY_CONFIG).
 FALLBACK_TARGETS = [
     f"@{settings.AZURE_SLUG}/{settings.AZURE_OPENAI_DEPLOYMENT}",
-    f"@{settings.GROQ_SLUG}/llama-3.3-70b-versatile",
-    f"@{settings.GROQ_SLUG_2}/llama-3.1-8b-instant",
+    f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b",
+    f"@{settings.GROQ_SLUG_2}/openai/gpt-oss-20b",
 ]
 
 # No `temperature` override anywhere below: gpt-5-mini (Azure primary) is a
 # reasoning model and rejects any value other than the default 1 — verified
 # directly ("Unsupported value: 'temperature' does not support 0.1 with this
-# model"). Groq's llama models tolerate the default fine, so omitting it
-# works for every target in the fallback chain.
+# model"). The Groq fallback targets (openai/gpt-oss-120b, openai/gpt-oss-20b
+# — also reasoning models) tolerate the default fine, so omitting it works
+# for every target in the fallback chain.
+#
+# Groq fallback models: llama-3.3-70b-versatile and llama-3.1-8b-instant were
+# both removed from Groq's catalog entirely at some point after this was
+# first built (confirmed via GET /v1/models 404ing on both) — this broke
+# every single query in production, since guardrails (app/guardrails/
+# rails.py, a separate direct-Groq call, not through this fallback chain)
+# also depended on the first one and runs on every request. Replaced with
+# openai/gpt-oss-120b / openai/gpt-oss-20b, both confirmed present in
+# Groq's current model list at the time of this fix.
 #
 # max_completion_tokens (not max_tokens) everywhere below: Azure rejects
 # `max_tokens` outright for gpt-5-mini ("Unsupported parameter... Use

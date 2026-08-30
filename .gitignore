@@ -8,3 +8,5 @@ DATA/
 notes.md
 processed_data/
 azuredeploymentcommands
+.claude
+.deepeval

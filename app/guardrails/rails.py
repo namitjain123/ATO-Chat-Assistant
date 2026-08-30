@@ -13,18 +13,23 @@ def initialize_rails() -> None:
     """
     Build the NeMo LLMRails singleton at app startup.
 
-    Uses llama-3.3-70b-versatile, not the smaller llama-3.1-8b-instant.
-    The 8b model was not reliably completing NeMo's internal few-shot
-    prompt template for the general-purpose dialog flow — it would
-    sometimes echo an unrelated early example line from the template
-    instead of generating a real answer, returning wrong responses to
-    legitimate questions. The larger model does not have this problem.
+    Model history: llama-3.3-70b-versatile was originally chosen over the
+    smaller llama-3.1-8b-instant, which wasn't reliably completing NeMo's
+    internal few-shot prompt template for the general-purpose dialog flow —
+    it would sometimes echo an unrelated early example line from the
+    template instead of generating a real answer. Both Llama models were
+    subsequently removed from Groq's catalog entirely (confirmed via
+    GET /v1/models returning a 404 for both at request time — this broke
+    every single query in production, since guardrails runs on every one).
+    openai/gpt-oss-120b replaces it: verified elsewhere in this project
+    (golden_synthetic.py) for reliable instruction-following without the
+    template-echoing failure mode the 8b model had.
     """
     global _rails
 
     guard_llm = ChatGroq(
         api_key=settings.GROQ_API_KEY,
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         temperature=0,
         max_retries=6,  # this call bypasses Portkey's retry/fallback entirely — needs its own resilience against Groq's free-tier TPM limit
     )
@@ -35,7 +40,7 @@ def initialize_rails() -> None:
     )
 
     _rails = LLMRails(config, llm=guard_llm)
-    logfire.info("NeMo Guardrails initialised (llama-3.3-70b-versatile).")
+    logfire.info("NeMo Guardrails initialised (openai/gpt-oss-120b).")
     
     
 
