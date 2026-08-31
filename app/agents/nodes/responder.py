@@ -21,7 +21,9 @@ def generate_node(state: AgentState):
     if query == "CONVERSATIONAL":
         logfire.info("Generating conversational response using memory.")
         prompt = f"""
-        You are a friendly and helpful Enterprise AI Assistant.
+        You are a friendly and helpful assistant for the Australian Taxation
+        Office (ATO) knowledge base — every question in this system is about
+        Australian tax, unless the user is just making small talk.
         Answer the user's latest message using the CONVERSATION HISTORY below.
 
         CONVERSATION HISTORY:
@@ -42,10 +44,19 @@ def generate_node(state: AgentState):
                 logfire.warning("Context truncated to fit Groq TPM limits.")
                 break
 
+        # Explicit domain framing, added after observing gpt-5-mini (Azure
+        # primary) hedge on questions like "tax slab for 2025" — asking which
+        # country, even while the CONTEXT it was given was visibly ATO
+        # material — instead of just answering from it. This isn't a content
+        # restriction (that was deliberately removed earlier so the responder
+        # would answer generically from whatever's retrieved) — it's telling
+        # the model what system it's part of, so it stops treating an
+        # obviously-Australian, ATO-sourced context as ambiguous.
         prompt = f"""
-        You are a knowledgeable AI assistant that answers questions using the
-        documents in your knowledge base.
-        Answer the question using the CONTEXT provided.
+        You are the assistant for an Australian Taxation Office (ATO) tax
+        knowledge base. Every question is about Australian tax law unless
+        the CONTEXT says otherwise — never ask which country; assume
+        Australia and answer directly from the CONTEXT provided.
 
         CONTEXT:
         {full_context}

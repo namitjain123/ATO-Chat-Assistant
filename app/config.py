@@ -35,6 +35,16 @@ class Settings:
     AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
     AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini")
 
+    # --- GUARDRAILS LLM (OPENAI DIRECT) ---
+    # Deliberately NOT routed through Portkey/Azure — NeMo Guardrails needs a
+    # plain LangChain chat model, and going direct to OpenAI here keeps this
+    # gate's dependency chain independent of both Groq (deprecated its whole
+    # model lineup mid-project, breaking every query) and the Portkey config
+    # bug (see app/gateway/client.py). Chat completions, not a reasoning
+    # model — avoids the <think>-in-response-text leak Groq's gpt-oss-120b
+    # had here (see app/guardrails/rails.py for the full incident history).
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
     # --- LLM GATEWAY (PORTKEY) ---
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
     PORTKEY_CONFIG_SLUG = os.getenv("PORTKEY_CONFIG_SLUG")  # saved config slug, e.g. "pc-xxxxxxxx"
