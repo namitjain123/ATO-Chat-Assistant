@@ -1,13 +1,13 @@
 import logfire
 from app.agents.state import AgentState
-from app.gateway.client import create_completion_with_fallback, extract_cache_status
+from app.gateway.client import create_completion_with_fallback
 
 
 def generate_node(state: AgentState):
     """
     Synthesizes a response using both Documentation Context AND Conversation History.
-    Uses the native Portkey client (not LangChain) so we can read the
-    x-portkey-cache-status response header and surface Cache: Hit in the UI.
+    Uses the native Portkey client (not LangChain) via
+    create_completion_with_fallback, which walks the Azure -> Groq target chain.
     """
     query = state["current_query"]
 
@@ -77,22 +77,12 @@ def generate_node(state: AgentState):
                 messages=[{"role": "user", "content": prompt}],
             )
             content = response.choices[0].message.content
-            cache_status = extract_cache_status(response)
-            is_cache_hit = cache_status == "HIT"
-
-            if is_cache_hit:
-                logfire.info("⚡ Gateway Cache Hit — response served from Portkey cache.")
-                plan_update = state["plan"] + ["Cache: Hit ⚡"]
-                status = "Cache hit — instant response."
-            else:
-                logfire.info("✅ Response synthesised via LLM.")
-                plan_update = state["plan"]
-                status = "Response generated."
+            logfire.info("✅ Response synthesised via LLM.")
 
             return {
                 "final_answer": content,
-                "status": status,
-                "plan": plan_update,
+                "status": "Response generated.",
+                "plan": state["plan"],
                 "messages": [{"role": "assistant", "content": content}]
             }
 

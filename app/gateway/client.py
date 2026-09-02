@@ -12,8 +12,8 @@ from app.config import settings
 # create_completion_with_fallback, get_structured_llm_with_fallback below),
 # not via Portkey's own server-side fallback strategy. That was the original
 # plan — GATEWAY_CONFIG below still documents the intended target chain and
-# is still used for its cache/retry settings — but Portkey's server-side
-# fallback has a confirmed bug/limitation for Azure OpenAI targets
+# retry settings — but Portkey's server-side fallback has a confirmed
+# bug/limitation for Azure OpenAI targets
 # specifically: every direct-addressed call to the Azure target succeeded
 # (verified repeatedly, including through Portkey's own "Run Test Request"
 # tool), while every identical call routed through the saved fallback config
@@ -26,7 +26,6 @@ from app.config import settings
 # correctly, while its simpler direct-request path does.
 GATEWAY_CONFIG = {
     "strategy": {"mode": "fallback"},
-    "cache": {"mode": "simple"},
     "retry": {
         "attempts": 2,
         "on_status_codes": [429, 503]
@@ -52,10 +51,7 @@ portkey_client = Portkey(
 # call through portkey_client (config attached) landed on Groq every time;
 # the identical call through this config-free client landed on Azure
 # (model in the response: "gpt-5-mini-2025-08-07"). Used specifically for the
-# application-level fallback functions below. Trade-off: loses Portkey's
-# gateway-level response caching (tied to the config's "cache" setting) for
-# calls made this way — acceptable given a working primary/fallback chain is
-# the actual requirement here.
+# application-level fallback functions below.
 portkey_client_direct = Portkey(api_key=settings.PORTKEY_API_KEY)
 
 # Ordered primary -> fallback targets, addressed directly by @slug/model — the
@@ -98,8 +94,7 @@ def create_completion_with_fallback(messages: list, max_completion_tokens: int =
     Calls each target in FALLBACK_TARGETS in order (Azure primary, then Groq
     fallbacks), moving to the next on any failure. Raw-Portkey-client
     equivalent of get_structured_llm_with_fallback below — used by
-    responder.py, which needs the native client (not LangChain) to read the
-    x-portkey-cache-status header.
+    responder.py.
     """
     last_error = None
     for i, target in enumerate(FALLBACK_TARGETS):
@@ -169,15 +164,3 @@ def get_structured_llm_with_fallback(schema, feature: str = "rag", method: str =
     return primary.with_fallbacks(fallbacks) if fallbacks else primary
 
 
-def extract_cache_status(response) -> str:
-    """
-    Pull x-portkey-cache-status from the Portkey native client response headers.
-    Tries multiple attribute paths defensively — returns 'MISS' if not found.
-    """
-    for attr in ("_raw_response", "_response", "_http_response"):
-        raw = getattr(response, attr, None)
-        if raw is not None:
-            status = getattr(raw, "headers", {}).get("x-portkey-cache-status", "")
-            if status:
-                return status.upper()
-    return "MISS"

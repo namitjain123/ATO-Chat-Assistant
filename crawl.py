@@ -25,14 +25,6 @@ MAX_PAGES = 25          # cap total pages crawled
 MAX_DEPTH = 2           # how many link-hops from START_URL to follow
 MIN_CONTENT_CHARS = 800  # skip thin nav/hub pages with little real text
 
-
-# PruningContentFilter's density heuristic misses this site-wide chrome on a
-# few longer pages (verified: 3/25 pages still carried it after pruning). Both
-# patterns are exact ATO template boilerplate, not article content, so a
-# direct strip is safe: "### Tools" reliably marks the start of the footer nav
-# block (Tools / Tax information for / Help and support / copyright), and the
-# "Log in to ATO online services" widget duplicates itself at the top of a
-# couple of pages.
 FOOTER_MARKER = "### Tools"
 LOGIN_BLOCK_RE = re.compile(
     r"(?:Log in to online services ?Log in\s*\n)?"

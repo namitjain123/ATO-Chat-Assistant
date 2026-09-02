@@ -20,8 +20,8 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       # No secrets needed here — verified directly that every module the
-      # test suite imports (app.gateway.client, app.services.cache, crawl,
-      # evals.pipeline, app.ingestion.chunking.splitter) loads cleanly with
+      # test suite imports (app.gateway.client, crawl, evals.pipeline,
+      # app.ingestion.chunking.splitter) loads cleanly with
       # zero API keys set. Tests mock any external client calls rather than
       # hitting real APIs.
       - name: Run tests

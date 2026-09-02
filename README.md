@@ -12,14 +12,13 @@ A production-grade RAG chatbot built with **LangGraph**, **Azure OpenAI + Groq v
 - **Durable Memory**: LangGraph checkpointer — a shared Postgres store when `POSTGRES_URL` is set (survives restarts / multiple replicas), falling back to in-process memory for local runs.
 - **Guardrails**: NeMo Guardrails gate (Llama 3.3 70B + FastEmbed embeddings-only intent matching) blocks off-topic, jailbreak, and injection inputs before any retrieval — verified against paraphrased attacks, not just exact-match examples. Layered on top of Azure OpenAI's own default content filtering, so unsafe input faces two independent checks, not one.
 - **LLM Gateway**: Portkey routes all LLM calls, with **Azure OpenAI (`gpt-5-mini`) as primary and Groq as automatic fallback** — implemented at the application level after finding a bug in Portkey's own server-side fallback for Azure targets (details + how failover was verified in [LLM Provider](#llm-provider-azure-openai-primary-groq-automatic-fallback)).
-- **Two-Layer Cache**: In-process (`cachetools`) + Redis (shared/persistent) caching for embeddings and retrieval — the two pipeline layers Portkey's own gateway cache doesn't cover. Degrades to in-process-only if Redis isn't running, never a hard dependency.
 - **Enterprise Search**: Qdrant Cloud for high-performance vector search + FlashRank for local semantic reranking.
 - **Gemini Embeddings**: Google `gemini-embedding-2-preview` (3072-dim) via `langchain-google-genai`, with a local `sentence-transformers` fallback.
 - **Live Knowledge Ingestion**: A `crawl4ai`-based deep crawler pulls real content from ato.gov.au — no static sample docs, with a pruning content filter that strips repeated site nav/footer chrome before it ever reaches the chunker.
 - **Observability**: Full trace nesting with **Pydantic Logfire** and **LangSmith** across every agent node.
 - **Evaluation Suite**: Auto-generated golden Q&A dataset (via `deepeval`) + a RAGAS-powered eval pipeline (6 metrics) with a dedicated Streamlit demo app.
 - **Cloud Deployment**: Azure Container Apps (backend + UI), Postgres Flexible Server, and a GitHub Actions pipeline that builds both images on every push.
-- **Test Suite**: `pytest` unit tests covering the pieces most worth pinning down — chunking (a real bug regression guard), the two-layer cache, crawl boilerplate-stripping, and the Azure/Groq fallback logic (mocked, no network calls) — run as a required CI gate before every build/deploy.
+- **Test Suite**: `pytest` unit tests covering the pieces most worth pinning down — chunking (a real bug regression guard), crawl boilerplate-stripping, and the Azure/Groq fallback logic (mocked, no network calls) — run as a required CI gate before every build/deploy.
 
 ---
 
@@ -138,13 +137,12 @@ Azure OpenAI has no free tier — unlike everything else in this project's stack
 │   │   ├── chunking/    # Paragraph-based text splitter (~1500 char target)
 │   │   └── loaders/     # Local parsers — PDF (pypdf), HTML, TXT/MD, DOCX, PPTX
 │   ├── services/
-│   │   ├── cache.py     # Two-layer (in-process + Redis) cache for embeddings/retrieval
 │   │   └── retrieval/   # Gemini embeddings + Qdrant search + FlashRank reranking
 │   ├── ui/              # Streamlit chat interface with reasoning step transparency
 │   ├── config.py        # Centralized environment variable management
 │   └── main.py          # FastAPI entrypoint — guardrails gate + /query endpoint
 ├── evals/               # Golden-dataset pipeline, RAGAS eval suite, Streamlit 3-tab demo
-├── tests/                # pytest unit tests — chunking, cache, crawl utils, LLM fallback
+├── tests/                # pytest unit tests — chunking, crawl utils, eval helpers, LLM fallback
 ├── crawl.py              # Deep-crawls a live source site into DATA/<name>/
 ├── golden_synthetic.py   # Generates evals/golden_dataset.json from crawled docs
 ├── processed_data/       # Auto-generated — parsed & chunked JSON output per document
@@ -233,9 +231,6 @@ BACKEND_URL = ""                    # e.g. http://localhost:8000
 # Eval judge LLM (keep separate from main key to avoid rate-limiting the live app)
 JUDGE_GROQ = ""
 
-# Two-layer cache (optional — omit to run with in-process caching only)
-REDIS_URL = "redis://localhost:6379/0"
-
 # Gemini Embeddings
 GEMINI_API_KEY = ""
 
@@ -261,15 +256,7 @@ python -m app.ingestion.processor DATA/ato_deductions ato --wipe
 
 > Pass `--wipe` to drop and recreate the Qdrant collection. Omit it to append to an existing collection.
 
-### 5. (Optional) Start the local Redis cache
-
-```powershell
-docker compose up -d redis
-```
-
-Enables the shared (L2) layer of the two-layer cache. Skip this entirely if you don't have Docker — the app degrades to in-process-only caching automatically, no crash, no config change needed.
-
-### 6. Launch the app
+### 5. Launch the app
 
 ```powershell
 # Terminal 1 — FastAPI backend
@@ -285,7 +272,7 @@ streamlit run app/ui/app.py --server.port 8501
 > suite (below) at the same time, pin both ports explicitly as shown here,
 > rather than relying on the default to "figure it out."
 
-### 7. (Optional) Regenerate the golden dataset
+### 6. (Optional) Regenerate the golden dataset
 
 Auto-generates realistic Q&A pairs from whatever's currently in `DATA/`, for use by the eval suite. Runs on Groq by default (free) rather than requiring `OPENAI_API_KEY` — batched with a persistent progress file (`DATA/golden_dataset/batch_progress.json`) so a large corpus can be generated across several runs without re-spending quota on pages already done.
 
@@ -293,7 +280,7 @@ Auto-generates realistic Q&A pairs from whatever's currently in `DATA/`, for use
 python golden_synthetic.py
 ```
 
-### 8. Run the eval suite (optional)
+### 7. Run the eval suite (optional)
 
 ```powershell
 # Requires the FastAPI backend running on :8000

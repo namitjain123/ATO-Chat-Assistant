@@ -18,9 +18,6 @@ class Settings:
     GROQ_MODEL = "llama-3.3-70b-versatile"
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
-    # --- CACHE (REDIS, L2 — see app/services/cache.py) ---
-    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
     # --- PRIMARY LLM (AZURE OPENAI) ---
     # Primary, not fallback: if Azure were fallback-only the system would never
     # touch it in normal operation. Groq is now the automatic fallback (see
