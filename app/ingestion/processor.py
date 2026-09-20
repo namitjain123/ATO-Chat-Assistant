@@ -11,10 +11,20 @@ from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.config import settings
 from app.services.retrieval.embedding import embed_texts, get_embedding_dim
+from app.services.retrieval.sparse_embedding import embed_documents_sparse
 from app.ingestion.loaders.pdf import parse_pdf
 from app.ingestion.loaders.html import parse_html
 from app.ingestion.loaders.text import parse_text
-from app.ingestion.chunking.splitter import chunk_text
+from app.ingestion.chunking.splitter import chunk_parent_child
+from app.ingestion.contextualizer import contextualize_chunks, build_embedding_inputs, embedding_prefix
+from app.ingestion.graph_extractor import index_document_graph
+from app.services.graph.neo4j_client import get_driver, ensure_schema, wipe_graph
+from app.ingestion.metadata import (
+    title_from_filename, page_summary, heading_positions, section_at, locate_chunks, income_years,
+)
+
+# Payload fields query-time filters run against (see qdrant_service._build_filter).
+KEYWORD_INDEXED_FIELDS = ("topics", "income_years", "source", "source_type", "parent_id")  # parent_id: graph evidence lookups
 
 logfire.configure(service_name="enterprise-ingestion-service", token=os.getenv("LOGFIRE_TOKEN"), send_to_logfire="if-token-present")
 
@@ -80,34 +90,69 @@ def process_file(file_path: str, filename: str, source_type: str):
                 logfire.warning(f"No text extracted from {filename} — skipping.")
                 return
 
-            # 2. Chunk text
-            chunks = chunk_text(full_text)
-            if not chunks:
+            # 2. Chunk text — parent-child ("small-to-big"): small child chunks get
+            # embedded and searched for precise matching, but each child's larger
+            # parent chunk is what's actually stored as retrievable content — see
+            # chunk_parent_child's docstring for why a single flat chunk size was
+            # always a tradeoff in both directions.
+            pairs = chunk_parent_child(full_text)
+            if not pairs:
                 return
 
             # 3. Save processed metadata locally
             processed_data = {
                 "filename": filename,
                 "source_type": source_type,
-                "chunks": chunks,
+                "chunks": pairs,  # each: {parent_id, parent_text, child_text}
             }
             local_path = save_processed_locally(processed_data, source_type, filename)
             logfire.info(f"Saved processed data → {local_path}")
 
-            # 4. Embed and index in Qdrant
+            # 4. Embed (dense + sparse) and index in Qdrant
             with logfire.span("Vectorizing & Indexing"):
-                embeddings = embed_texts(chunks)
+                child_texts = [pair["child_text"] for pair in pairs]
+                if settings.ENABLE_CONTEXTUAL_RETRIEVAL:
+                    annotations = contextualize_chunks(full_text, child_texts)
+                else:
+                    annotations = [{"context": "", "topics": []} for _ in child_texts]
+
+                title = title_from_filename(filename)
+                summary = page_summary(full_text)
+                headings = heading_positions(full_text)
+                sections = [section_at(headings, pos) for pos in locate_chunks(full_text, child_texts)]
+
+                # Heading path is embedded too — deterministic context that still
+                # helps when ENABLE_CONTEXTUAL_RETRIEVAL is off.
+                prefixes = [embedding_prefix(title, section, ann["context"]) for section, ann in zip(sections, annotations)]
+                embed_inputs = build_embedding_inputs(prefixes, child_texts)
+                dense_vectors = embed_texts(embed_inputs)
+                sparse_vectors = embed_documents_sparse(embed_inputs)
                 points = [
                     models.PointStruct(
                         id=str(uuid.uuid4()),
-                        vector=vector,
+                        vector={
+                            settings.DENSE_VECTOR_NAME: dense_vec,
+                            settings.SPARSE_VECTOR_NAME: sparse_vec,
+                        },
                         payload={
-                            "text": chunk,
+                            "text": pair["parent_text"],       # returned to the LLM — full parent context
+                            "child_text": pair["child_text"],  # what was matched (embedded with prefix)
+                            "context": ann["context"],         # contextual-retrieval note, "" if disabled/failed
+                            "parent_id": pair["parent_id"],    # dedupe key — see qdrant_service.py
+                            "chunk_index": i,                  # position within the document
                             "source": filename,
                             "source_type": source_type,
+                            "title": title,
+                            "summary": summary,
+                            "section": section,
+                            "topics": ann["topics"],           # filterable — LLM-tagged, [] if unknown
+                            "income_years": income_years(f"{pair['child_text']} {ann['context']}"),  # filterable
+                            "ingested_at": int(time.time()),
                         },
                     )
-                    for chunk, vector in zip(chunks, embeddings)
+                    for i, (pair, ann, section, dense_vec, sparse_vec) in enumerate(
+                        zip(pairs, annotations, sections, dense_vectors, sparse_vectors)
+                    )
                 ]
 
                 UPSERT_BATCH_SIZE = 100
@@ -118,7 +163,19 @@ def process_file(file_path: str, filename: str, source_type: str):
                         collection_name=settings.QDRANT_COLLECTION,
                         points=batch,
                     )
-                logfire.info(f"Indexed {len(points)} points to Qdrant from {filename}.")
+                num_parents = len({pair["parent_id"] for pair in pairs})
+                logfire.info(f"Indexed {len(points)} child points ({num_parents} parent chunks) to Qdrant from {filename}.")
+
+            # 5. Knowledge graph (Neo4j) — per parent chunk: bigger than a child,
+            # so each extraction call sees whole statements, and ~5x fewer calls.
+            driver = get_driver()
+            if driver is not None:
+                parents = {pair["parent_id"]: pair["parent_text"] for pair in pairs}
+                try:
+                    index_document_graph(driver, title, filename, parents)
+                except Exception as e:
+                    # Qdrant indexing above already succeeded — don't report the file as failed.
+                    logfire.error(f"Graph indexing failed for {filename} (vector index unaffected): {e}")
 
         except Exception as e:
             logfire.error(f"Failed to process {filename}: {e}")
@@ -169,21 +226,51 @@ def run_universal_ingestion(base_dir: str, explicit_source_type: str = None, wip
                 if _with_retry(qdrant_client.collection_exists, settings.QDRANT_COLLECTION):
                     _with_retry(qdrant_client.delete_collection, settings.QDRANT_COLLECTION)
                     logfire.info(f"Collection '{settings.QDRANT_COLLECTION}' deleted.")
+                # The graph's evidence pointers are this collection's parent_ids,
+                # which are regenerated on every ingest — wipe both or neither.
+                driver = get_driver()
+                if driver is not None:
+                    wipe_graph(driver)
+                    logfire.info("Knowledge graph wiped.")
 
-        # Recreate collection — dimension resolved at runtime after embedding model probe
+        driver = get_driver()
+        if driver is not None:
+            ensure_schema(driver)
+        elif settings.NEO4J_URI:
+            logfire.warning("NEO4J_URI is set but Neo4j is unreachable — ingesting WITHOUT the knowledge graph.")
+
+        # Recreate collection — dimension resolved at runtime after embedding model probe.
+        # Named dense + sparse vectors (hybrid retrieval): a collection created before
+        # this had a single unnamed dense vector, which the hybrid query code (see
+        # qdrant_service.py, gated by settings.ENABLE_HYBRID_SEARCH) cannot query by
+        # name. This branch only runs on a fresh collection or after --wipe, so it's
+        # also the migration path — running --wipe + re-ingesting is what upgrades an
+        # existing collection to the hybrid schema.
         if not _with_retry(qdrant_client.collection_exists, settings.QDRANT_COLLECTION):
             dim = get_embedding_dim()
             _with_retry(
                 qdrant_client.create_collection,
                 collection_name=settings.QDRANT_COLLECTION,
-                vectors_config=models.VectorParams(
-                    size=dim,
-                    distance=models.Distance.COSINE,
-                ),
+                vectors_config={
+                    settings.DENSE_VECTOR_NAME: models.VectorParams(
+                        size=dim,
+                        distance=models.Distance.COSINE,
+                    ),
+                },
+                sparse_vectors_config={
+                    settings.SPARSE_VECTOR_NAME: models.SparseVectorParams(),
+                },
             )
+            for field in KEYWORD_INDEXED_FIELDS:
+                _with_retry(
+                    qdrant_client.create_payload_index,
+                    collection_name=settings.QDRANT_COLLECTION,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
             logfire.info(
                 f"Created collection '{settings.QDRANT_COLLECTION}' "
-                f"({dim}-dim, Cosine)."
+                f"(dense: {dim}-dim Cosine, sparse: BM25, keyword indexes: {', '.join(KEYWORD_INDEXED_FIELDS)})."
             )
 
         # Route to sub-folders or treat the whole dir as one source

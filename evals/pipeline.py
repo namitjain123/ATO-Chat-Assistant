@@ -26,7 +26,7 @@ REQUEST_TIMEOUT = 120      # seconds — guardrails + LangGraph + Groq can take 
 def detect_tool(thought_process: list) -> str:
     """
     Maps the thought_process list from /query response to a tool name.
-    Planner sets:  'Intent: Technical' + 'Search Term: ...' → retrieve_documents
+    Router sets:   'Intent: Technical' + 'Search Term: ...' → retrieve_documents
                    'Intent: Conversational/Memory'           → direct_answer
     main.py sets:  'Intent: Guardrails Fired'                → guardrails
     """

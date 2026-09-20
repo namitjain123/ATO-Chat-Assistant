@@ -1,5 +1,6 @@
 import logfire
 from portkey_ai import Portkey, createHeaders, PORTKEY_GATEWAY_URL
+from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI
 
 from app.config import settings
@@ -11,10 +12,8 @@ from app.config import settings
 # Fallback is implemented at the APPLICATION level (see FALLBACK_TARGETS,
 # create_completion_with_fallback, get_structured_llm_with_fallback below),
 # not via Portkey's own server-side fallback strategy. That was the original
-# plan — GATEWAY_CONFIG below still documents the intended target chain and
-# retry settings — but Portkey's server-side fallback has a confirmed
-# bug/limitation for Azure OpenAI targets
-# specifically: every direct-addressed call to the Azure target succeeded
+# plan, but Portkey's server-side fallback has a confirmed bug/limitation for
+# Azure OpenAI targets specifically: every direct-addressed call succeeded
 # (verified repeatedly, including through Portkey's own "Run Test Request"
 # tool), while every identical call routed through the saved fallback config
 # failed with "azure-openai error: Resource not found" — despite the Azure
@@ -24,39 +23,22 @@ from app.config import settings
 # path (not just a body field, unlike Groq/OpenAI-style providers), and
 # Portkey's fallback-iteration code path appears not to construct that URL
 # correctly, while its simpler direct-request path does.
-GATEWAY_CONFIG = {
-    "strategy": {"mode": "fallback"},
-    "retry": {
-        "attempts": 2,
-        "on_status_codes": [429, 503]
-    },
-    "targets": [
-        {"override_params": {"model": f"@{settings.AZURE_SLUG}/{settings.AZURE_OPENAI_DEPLOYMENT}"}},
-        {"override_params": {"model": f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b"}},
-        {"override_params": {"model": f"@{settings.GROQ_SLUG_2}/openai/gpt-oss-20b"}},
-    ]
-}
-
-PORTKEY_CONFIG = settings.PORTKEY_CONFIG_SLUG or GATEWAY_CONFIG
-
-portkey_client = Portkey(
-    api_key=settings.PORTKEY_API_KEY,
-    config=PORTKEY_CONFIG
-)
-
-# A `config` attached at the CLIENT level (like portkey_client above) keeps
-# applying Portkey's server-side fallback-strategy routing on every call made
-# through it — even ones with an explicit `model=` override — which is
-# exactly the broken path being avoided here. Verified directly: the same
-# call through portkey_client (config attached) landed on Groq every time;
-# the identical call through this config-free client landed on Azure
-# (model in the response: "gpt-5-mini-2025-08-07"). Used specifically for the
-# application-level fallback functions below.
+# There is deliberately no gateway `config` here, and no client that carries
+# one. A previous GATEWAY_CONFIG declared a fallback strategy AND
+# `retry: {attempts: 2, on_status_codes: [429, 503]}`, but nothing ever used
+# it — every call goes through the config-free client below — so it described
+# retry protection the system did not have. It can't simply be switched on
+# either: attaching a config at the CLIENT level re-applies Portkey's broken
+# server-side fallback routing to every call through it, even ones naming
+# their model explicitly. Verified directly: the same call with a config
+# attached landed on Groq every time; config-free it landed on Azure (response
+# model "gpt-5-mini-2025-08-07"). Retry-on-429 belongs in
+# create_completion_with_fallback, alongside the target loop, if added later.
 portkey_client_direct = Portkey(api_key=settings.PORTKEY_API_KEY)
 
 # Ordered primary -> fallback targets, addressed directly by @slug/model — the
 # path verified to work reliably, bypassing Portkey's broken server-side
-# fallback strategy for Azure specifically (see comment above GATEWAY_CONFIG).
+# fallback strategy for Azure specifically (see the module comment above).
 FALLBACK_TARGETS = [
     f"@{settings.AZURE_SLUG}/{settings.AZURE_OPENAI_DEPLOYMENT}",
     f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b",
@@ -103,6 +85,7 @@ def create_completion_with_fallback(messages: list, max_completion_tokens: int =
                 model=target,
                 messages=messages,
                 max_completion_tokens=max_completion_tokens,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
                 **kwargs,
             )
             if i > 0:
@@ -114,7 +97,7 @@ def create_completion_with_fallback(messages: list, max_completion_tokens: int =
     raise last_error
 
 
-def _make_chat_model(model_str: str, feature: str) -> ChatOpenAI:
+def _make_chat_model(model_str: str, feature: str, max_completion_tokens: int = 2048) -> ChatOpenAI:
     # No `config=` in createHeaders here — same reason as portkey_client_direct
     # above: a config attached (even just via headers) keeps triggering
     # Portkey's broken server-side fallback routing for the Azure target, even
@@ -123,7 +106,8 @@ def _make_chat_model(model_str: str, feature: str) -> ChatOpenAI:
         api_key=settings.PORTKEY_API_KEY,
         base_url=PORTKEY_GATEWAY_URL,
         model=model_str,
-        model_kwargs={"max_completion_tokens": 2048},
+        timeout=settings.LLM_TIMEOUT_SECONDS,  # a hung target should fail over, not stall the request
+        model_kwargs={"max_completion_tokens": max_completion_tokens},
         default_headers=createHeaders(
             api_key=settings.PORTKEY_API_KEY,
             metadata={
@@ -151,15 +135,36 @@ def get_langchain_llm(feature: str = "rag") -> ChatOpenAI:
     return _make_chat_model(FALLBACK_TARGETS[0], feature)
 
 
-def get_structured_llm_with_fallback(schema, feature: str = "rag", method: str = "function_calling"):
+def _require_parsed(result):
+    """with_structured_output returns None — it doesn't raise — when the model
+    never makes the tool call. Real incident: gpt-5-mini spent its entire
+    completion budget on reasoning tokens (finish_reason="length",
+    reasoning_tokens == max_completion_tokens, zero tool calls) during graph
+    extraction. Returning None silently skipped the fallback chain; raising
+    here lets .with_fallbacks() try the next target instead."""
+    if result is None:
+        raise ValueError("Structured output missing — model returned no tool call (likely token budget exhausted by reasoning).")
+    return result
+
+
+def get_structured_llm_with_fallback(schema, feature: str = "rag", method: str = "function_calling",
+                                     max_completion_tokens: int = 2048):
     """
     Structured-output chain (Azure primary, Groq fallbacks) with the same
     application-level fallback as create_completion_with_fallback, built via
     LangChain's native .with_fallbacks() — each candidate is wrapped with
     with_structured_output first, then chained, so the whole thing still
     behaves like a single Runnable returning `schema` instances on .invoke().
+
+    max_completion_tokens covers reasoning AND the answer — size it for the
+    task's output: small for a routing decision, larger for extraction that
+    returns many items.
     """
-    candidates = [_make_chat_model(t, feature).with_structured_output(schema, method=method) for t in FALLBACK_TARGETS]
+    candidates = [
+        _make_chat_model(t, feature, max_completion_tokens).with_structured_output(schema, method=method)
+        | RunnableLambda(_require_parsed)
+        for t in FALLBACK_TARGETS
+    ]
     primary, *fallbacks = candidates
     return primary.with_fallbacks(fallbacks) if fallbacks else primary
 

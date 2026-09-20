@@ -1,4 +1,6 @@
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import logfire
 from langchain_openai import ChatOpenAI
@@ -50,21 +52,56 @@ def initialize_rails() -> None:
     chat-completions model (not a raw reasoning model), so no <think>
     leakage risk here either.
     """
-    global _rails
+    _build_rails()
+    _self_test()
 
+
+def _build_rails() -> None:
+    global _rails
     guard_llm = ChatOpenAI(
         api_key=settings.OPENAI_API_KEY,
         model="gpt-4o-mini",
         temperature=0,
+        # This gate runs before anything else on every request — a hung call
+        # here stalls the whole question, so it fails fast into _check's
+        # "failed" path (rebuild, retry, then fail open/closed) instead.
+        timeout=settings.LLM_TIMEOUT_SECONDS,
     )
-
     config = RailsConfig.from_content(
         colang_content=COLANG_CONTENT,
         yaml_content=YAML_CONTENT
     )
-
     _rails = LLMRails(config, llm=guard_llm)
     logfire.info("NeMo Guardrails initialised (OpenAI gpt-4o-mini, direct).")
+
+
+def _self_test(attempts: int = 3) -> bool:
+    """
+    NeMo builds its embeddings index (the canonical off-topic/jailbreak/
+    greeting examples) lazily, on the first check — and if that build fails,
+    it never retries. Real incident (local run): FastEmbed's model check
+    against HuggingFace hit connection resets on the first request, and every
+    check after that raised "Index is not built yet" — guardrails were off
+    for the process's whole life (9/9 requests unchecked; "tell me a joke"
+    got a joke), and nothing but NeMo's own internal log said so.
+
+    So: build it at startup, and prove it works — a greeting must fire.
+    """
+    for attempt in range(1, attempts + 1):
+        # Worker thread, not inline: this runs during FastAPI startup, inside the
+        # event loop, where NeMo's sync generate() refuses to run ("sync
+        # `generate` inside async code"). /query requests already run on
+        # worker threads (sync endpoint), so this matches how guard() runs.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            status, _ = pool.submit(_check, "hello").result()
+        if status == "fired":
+            logfire.info("✅ Guardrails self-test passed (embeddings index built).")
+            return True
+        logfire.warning(f"⚠️ Guardrails self-test failed (attempt {attempt}/{attempts}: {status}) — rebuilding.")
+        time.sleep(2 ** attempt)
+        _build_rails()
+    logfire.error("❌ Guardrails self-test failed at startup — checks will retry on each request; see GUARDRAILS_FAIL_CLOSED.")
+    return False
     
     
 
@@ -110,20 +147,54 @@ def guard(message: str) -> tuple[bool, str | None]:
         return False, None
 
     with logfire.span("🛡️ Guardrails Check"):
-        result = _rails.generate(messages=[{"role": "user", "content": message}])
+        status, content = _check(message)
 
-        # NeMo returns {'role': 'assistant', 'content': '...'} — extract text
-        content = result.get("content", "") if isinstance(result, dict) else str(result)
-        content = _THINK_BLOCK_RE.sub("", content).strip()
-        content_lower = content.lower()
+        if status == "failed":
+            # Self-heal: a fresh LLMRails rebuilds its index on the next check.
+            logfire.error("❌ Guardrails check failed (NeMo internal error) — rebuilding and retrying once.")
+            _build_rails()
+            status, content = _check(message)
 
-        fired = any(indicator in content for indicator in RAIL_INDICATORS) or any(
-            pattern in content_lower for pattern in GENERIC_REFUSAL_PATTERNS
-        )
+        if status == "failed":
+            if settings.GUARDRAILS_FAIL_CLOSED:
+                logfire.error(f"❌ Guardrails unavailable — failing CLOSED, message blocked | query='{message[:80]}'")
+                return True, GUARDRAILS_UNAVAILABLE_MESSAGE
+            logfire.error(f"❌ Guardrails unavailable — failing OPEN, message passed UNCHECKED | query='{message[:80]}'")
+            return False, None
 
-        if fired:
+        if status == "fired":
             logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
             return True, content
 
         logfire.info("✅ Guardrails passed.")
         return False, None
+
+
+# NeMo's hardcoded reply when an action raises (e.g. "Index is not built yet").
+# Its wording matches neither RAIL_INDICATORS nor GENERIC_REFUSAL_PATTERNS, so
+# without this check a broken gate looked exactly like a clean message.
+NEMO_INTERNAL_ERROR = "an internal error has occurred"
+GUARDRAILS_UNAVAILABLE_MESSAGE = (
+    "I can't check that request right now — please try again in a moment."
+)
+
+
+def _check(message: str) -> tuple[str, str]:
+    """One pass through the rails: ("fired", response) | ("passed", "") | ("failed", "")."""
+    try:
+        result = _rails.generate(messages=[{"role": "user", "content": message}])
+    except Exception as e:
+        logfire.warning(f"Guardrails raised: {e}")
+        return "failed", ""
+
+    # NeMo returns {'role': 'assistant', 'content': '...'} — extract text
+    content = result.get("content", "") if isinstance(result, dict) else str(result)
+    content = _THINK_BLOCK_RE.sub("", content).strip()
+    content_lower = content.lower()
+
+    if NEMO_INTERNAL_ERROR in content_lower:
+        return "failed", ""
+    fired = any(indicator in content for indicator in RAIL_INDICATORS) or any(
+        pattern in content_lower for pattern in GENERIC_REFUSAL_PATTERNS
+    )
+    return ("fired", content) if fired else ("passed", "")

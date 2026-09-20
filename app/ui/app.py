@@ -17,7 +17,7 @@ try:
     token = os.getenv("LOGFIRE_TOKEN")
     if not token:
         print("ERROR: LOGFIRE_TOKEN is empty or None!")
-    logfire.configure(token=token)
+    logfire.configure(token=token, environment=os.getenv("APP_ENV", "production"))
     # logfire.instrument_requests() # Disabled due to OpenTelemetry bug on Windows: MeterProvider.get_meter() got multiple values for argument 'version'
     LOGFIRE_STATUS = "Connected & Tracing"
 except Exception as e:

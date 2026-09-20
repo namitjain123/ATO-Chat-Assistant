@@ -28,6 +28,23 @@ def warm_up() -> None:
     _get_ranker()
 
 
+def rerank_with_scores(query: str, documents: list[str], top_n: int = 5) -> list[tuple[str, float]]:
+    """(document, relevance score) pairs, best first. Scores are what the
+    retrieval grader thresholds on — see app/agents/nodes/grader.py.
+    On reranker failure, returns the original order with score None, so the
+    grader can tell "unknown" apart from "irrelevant"."""
+    if not documents:
+        return []
+    try:
+        results = _get_ranker().rerank(RerankRequest(
+            query=query, passages=[{"id": i, "text": doc} for i, doc in enumerate(documents)],
+        ))
+        return [(r["text"], float(r["score"])) for r in results[:top_n]]
+    except Exception as e:
+        logfire.error(f"❌ [Reranker] Semantic Reranking Failed: {e}")
+        return [(doc, None) for doc in documents[:top_n]]
+
+
 def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[str]:
     """
     Refines retrieval results by re-scoring documents against the query semantically.

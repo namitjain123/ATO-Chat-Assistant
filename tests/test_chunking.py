@@ -5,7 +5,7 @@ chunk_text used to silently let a single oversized paragraph pass through
 whole (real chunks up to 4442 chars were observed against a 1500 target,
 before _hard_split was added) — these tests guard against that regressing.
 """
-from app.ingestion.chunking.splitter import chunk_text, _hard_split
+from app.ingestion.chunking.splitter import chunk_text, chunk_parent_child, _hard_split
 
 
 def test_empty_text_returns_no_chunks():
@@ -82,3 +82,64 @@ def test_realistic_oversized_paragraph_from_a_real_bug():
     assert len(chunks) > 1
     for c in chunks:
         assert len(c) <= chunk_size
+
+
+# ── chunk_parent_child (small-to-big / parent-child chunking) ──────────────────
+#
+# Replaces flat ~1500-char chunks for ingestion: small child chunks get
+# embedded and searched for precise matching, but each child's larger parent
+# chunk is what's returned to the LLM, so an answer isn't built from an
+# isolated ~400-char fragment cut off mid-explanation. See the function's
+# own docstring for the full reasoning.
+
+def test_parent_child_empty_text_returns_no_pairs():
+    assert chunk_parent_child("") == []
+    assert chunk_parent_child("   \n\n  ") == []
+
+
+def test_parent_child_short_text_is_its_own_single_parent_and_child():
+    text = "A short paragraph well under both the parent and child size."
+    pairs = chunk_parent_child(text, parent_size=1000, child_size=500)
+    assert len(pairs) == 1
+    assert pairs[0]["parent_text"] == text
+    assert pairs[0]["child_text"] == text
+    assert pairs[0]["parent_id"]  # non-empty
+
+
+def test_parent_child_no_child_exceeds_child_size():
+    paragraphs = [f"Paragraph number {i} with a bit of extra padding text." for i in range(20)]
+    text = "\n\n".join(paragraphs)
+    pairs = chunk_parent_child(text, parent_size=2000, child_size=100)
+    assert len(pairs) > 1
+    for pair in pairs:
+        assert len(pair["child_text"]) <= 100
+
+
+def test_parent_child_multiple_children_share_one_parent():
+    # parent_size big enough to hold every paragraph as ONE parent;
+    # child_size small enough to force that parent to split into several
+    # children — the exact "small-to-big" shape this function exists for.
+    paragraphs = [f"Paragraph {i} content here for the test." for i in range(10)]
+    text = "\n\n".join(paragraphs)
+    pairs = chunk_parent_child(text, parent_size=5000, child_size=80)
+
+    assert len(pairs) > 1
+    parent_ids = {p["parent_id"] for p in pairs}
+    parent_texts = {p["parent_text"] for p in pairs}
+    assert len(parent_ids) == 1
+    assert len(parent_texts) == 1
+    assert parent_texts.pop() == text  # whole document, unsplit at the parent level
+
+
+def test_parent_child_distinct_parents_get_distinct_parent_ids():
+    paragraph_a = ("Alpha section text. " * 30).strip()
+    paragraph_b = ("Beta section text entirely different. " * 30).strip()
+    text = paragraph_a + "\n\n" + paragraph_b
+    parent_size = 400
+
+    expected_parents = chunk_text(text, chunk_size=parent_size)
+    assert len(expected_parents) >= 2  # sanity check on the fixture itself
+
+    pairs = chunk_parent_child(text, parent_size=parent_size, child_size=100)
+    parent_ids = {p["parent_id"] for p in pairs}
+    assert len(parent_ids) == len(expected_parents)

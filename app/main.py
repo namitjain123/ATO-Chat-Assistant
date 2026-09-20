@@ -3,10 +3,21 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-logfire.configure(token=os.getenv("LOGFIRE_TOKEN"), send_to_logfire="if-token-present")
+# APP_ENV tags every trace, so local test runs (APP_ENV=local) can be filtered
+# out of the same Logfire project production reports to.
+logfire.configure(token=os.getenv("LOGFIRE_TOKEN"), send_to_logfire="if-token-present",
+                  environment=os.getenv("APP_ENV", "production"))
+
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+# Shared, never shut down: each /query runs the graph here so the request can
+# abandon a pathological call at its deadline. Sized above one so a timed-out
+# request's orphaned worker doesn't block the next caller.
+_GRAPH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="graph")
 
 from fastapi import FastAPI, Response
 from app.agents.graph import rag_agent
+from app.config import settings
 from app.guardrails import initialize_rails, guard
 from app.services.retrieval.embedding import get_embedding_dim
 from app.services.retrieval.ranking_service import warm_up as warm_up_ranker
@@ -81,8 +92,30 @@ def query(request: QueryRequest):
             }
 
         # Gate 2: LangGraph RAG pipeline
-        # Run the graph synchronously to preserve Logfire context variables
-        final_output = rag_agent.invoke(initial_state, config=config)
+        # Run the graph synchronously to preserve Logfire context variables.
+        # Deadline: per-call timeouts bound each LLM call, but not their sum —
+        # one question can make ~10 (guardrails, router, a grade per retrieval
+        # pass, rewriter, responder). Run it on a worker so a pathological
+        # request returns a usable answer instead of hanging the client.
+        # NOT a `with` block: ThreadPoolExecutor.__exit__ joins its workers, so
+        # exiting one would wait for the very call the deadline is meant to
+        # escape. The shared pool is never shut down here.
+        future = _GRAPH_POOL.submit(rag_agent.invoke, initial_state, config=config)
+        try:
+            final_output = future.result(timeout=settings.REQUEST_DEADLINE_SECONDS)
+        except FuturesTimeout:
+            logfire.error(
+                f"⏱️ Request exceeded {settings.REQUEST_DEADLINE_SECONDS}s deadline | thread={thread_id}"
+            )
+            # The worker keeps running to completion (its checkpoint still
+            # lands), but the caller isn't left waiting on it.
+            return {
+                "question": q,
+                "answer": "That took longer than expected to answer. Please try again, or ask a narrower question.",
+                "thought_process": ["Timed out before an answer was ready."],
+                "status": "timeout",
+                "sources": []
+            }
         
         return {
             "question": q,

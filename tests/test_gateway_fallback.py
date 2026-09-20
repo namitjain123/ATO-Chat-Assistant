@@ -86,3 +86,42 @@ def test_stops_trying_targets_after_first_success():
     # actually touches Azure in normal operation.
     assert gw.FALLBACK_TARGETS[0].startswith(f"@{gw.settings.AZURE_SLUG}/")
     assert len(gw.FALLBACK_TARGETS) >= 2
+
+
+# -- structured output: a missing result must trigger the fallback ------------
+
+from langchain_core.runnables import RunnableLambda
+
+
+class _FakeChatModel:
+    """Stands in for ChatOpenAI; with_structured_output returns a runnable
+    producing whatever this target is scripted to return."""
+    def __init__(self, result):
+        self.result = result
+
+    def with_structured_output(self, schema, method):
+        return RunnableLambda(lambda _: self.result)
+
+
+def test_structured_none_falls_through_to_next_target(mocker):
+    # Real incident: the primary spent its whole token budget on reasoning and
+    # made no tool call -> with_structured_output returned None, not an error.
+    results = iter([None, "parsed-by-fallback", "unused"])
+    budgets = []
+
+    def make(model_str, feature, max_completion_tokens=2048):
+        budgets.append(max_completion_tokens)
+        return _FakeChatModel(next(results))
+
+    mocker.patch.object(gw, "_make_chat_model", side_effect=make)
+
+    chain = gw.get_structured_llm_with_fallback(object, feature="t", max_completion_tokens=8192)
+
+    assert chain.invoke("prompt") == "parsed-by-fallback"
+    assert set(budgets) == {8192}  # budget reaches every target in the chain
+
+
+def test_require_parsed_raises_on_none_and_passes_results_through():
+    with pytest.raises(ValueError):
+        gw._require_parsed(None)
+    assert gw._require_parsed("ok") == "ok"
