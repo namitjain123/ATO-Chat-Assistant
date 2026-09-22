@@ -42,7 +42,7 @@ langchain-nvidia-ai-endpoints
 portkey-ai
 
 ragas
-deepeval
+deepeval>=4.2.3  # older releases import from langchain.schema, removed in current langchain
 chromadb
 langfuse
 
